@@ -1,0 +1,160 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ─────────────────────────────────────────
+// CALENDAR (Unified view layer)
+// ─────────────────────────────────────────
+
+model CalendarEvent {
+  id          String   @id @default(cuid())
+  title       String
+  start       DateTime
+  end         DateTime
+  allDay      Boolean  @default(false)
+  area        String   // "DIET" | "EXERCISE" | "LEARNING" | "HABITS"
+  color       String?
+  description String?
+
+  mealLogId         String?          @unique
+  mealLog           MealLog?         @relation(fields: [mealLogId], references: [id], onDelete: Cascade)
+
+  workoutSessionId  String?          @unique
+  workoutSession    WorkoutSession?  @relation(fields: [workoutSessionId], references: [id], onDelete: Cascade)
+
+  learningSessionId String?          @unique
+  learningSession   LearningSession? @relation(fields: [learningSessionId], references: [id], onDelete: Cascade)
+
+  habitLogId        String?          @unique
+  habitLog          HabitLog?        @relation(fields: [habitLogId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────
+// DIET / EATING HABITS
+// ─────────────────────────────────────────
+
+model MealLog {
+  id          String   @id @default(cuid())
+  date        DateTime
+  mealType    String   // "breakfast" | "lunch" | "dinner" | "snack"
+  description String
+  calories    Int?
+  protein     Int?
+  carbs       Int?
+  fat         Int?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  calendarEvent CalendarEvent?
+}
+
+model DietGoal {
+  id             String   @id @default(cuid())
+  targetCalories Int?
+  targetProtein  Int?
+  targetCarbs    Int?
+  targetFat      Int?
+  activeFrom     DateTime @default(now())
+  createdAt      DateTime @default(now())
+}
+
+// ─────────────────────────────────────────
+// EXERCISE / GYM
+// ─────────────────────────────────────────
+
+model WorkoutSession {
+  id          String        @id @default(cuid())
+  date        DateTime
+  name        String
+  type        String        // "strength" | "cardio" | "mobility" | "sport"
+  durationMin Int
+  notes       String?
+  exercises   ExerciseSet[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  calendarEvent CalendarEvent?
+}
+
+model ExerciseSet {
+  id          String         @id @default(cuid())
+  session     WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId   String
+  name        String
+  sets        Int?
+  reps        Int?
+  weightKg    Float?
+  distanceKm  Float?
+  order       Int            @default(0)
+}
+
+// ─────────────────────────────────────────
+// LEARNING
+// ─────────────────────────────────────────
+
+model LearningSession {
+  id          String   @id @default(cuid())
+  date        DateTime
+  category    String   // "CODING" | "READING" | "FINANCE" | "OTHER"
+  title       String
+  durationMin Int
+  notes       String?
+  resource    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  calendarEvent CalendarEvent?
+}
+
+model Book {
+  id          String    @id @default(cuid())
+  title       String
+  author      String?
+  totalPages  Int?
+  currentPage Int       @default(0)
+  status      String    @default("reading") // "to-read" | "reading" | "finished"
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// ─────────────────────────────────────────
+// HABITS
+// ─────────────────────────────────────────
+
+model Habit {
+  id          String     @id @default(cuid())
+  name        String
+  type        String     // "QUIT" | "BUILD"
+  description String?
+  startDate   DateTime
+  targetDays  Int?
+  logs        HabitLog[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model HabitLog {
+  id        String   @id @default(cuid())
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  habitId   String
+  date      DateTime
+  kept      Boolean
+  notes     String?
+  createdAt DateTime @default(now())
+
+  calendarEvent CalendarEvent?
+
+  @@unique([habitId, date])
+}
