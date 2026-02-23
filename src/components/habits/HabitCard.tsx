@@ -4,8 +4,9 @@ import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, XCircle, Flame, Trash2 } from "lucide-react";
+import { CheckCircle2, XCircle, Flame, Trash2, Trophy } from "lucide-react";
 import { calculateStreak } from "@/lib/utils/streaks";
+import { startOfDay, subDays, isSameDay } from "date-fns";
 
 interface HabitLog {
   id: string;
@@ -27,13 +28,40 @@ interface Props {
   onUpdate: () => void;
 }
 
+const MILESTONES: { days: number; label: string }[] = [
+  { days: 3,   label: "3 days" },
+  { days: 7,   label: "1 week" },
+  { days: 14,  label: "2 weeks" },
+  { days: 21,  label: "21 days" },
+  { days: 30,  label: "1 month" },
+  { days: 60,  label: "2 months" },
+  { days: 100, label: "100 days" },
+];
+
+function getCurrentMilestone(streak: number) {
+  for (let i = MILESTONES.length - 1; i >= 0; i--) {
+    if (streak >= MILESTONES[i].days) return MILESTONES[i];
+  }
+  return null;
+}
+
+function getNextMilestone(streak: number) {
+  return MILESTONES.find((m) => m.days > streak) ?? null;
+}
+
 export function HabitCard({ habit, onUpdate }: Props) {
-  const todayLog = habit.logs[0];
   const [loading, setLoading] = useState(false);
 
   const streak = calculateStreak(
     habit.logs.map((l) => ({ date: new Date(l.date), kept: l.kept }))
   );
+
+  const todayLog = habit.logs.find((l) =>
+    isSameDay(new Date(l.date), new Date())
+  );
+
+  const currentMilestone = getCurrentMilestone(streak);
+  const nextMilestone = getNextMilestone(streak);
 
   async function check(kept: boolean) {
     setLoading(true);
@@ -52,16 +80,34 @@ export function HabitCard({ habit, onUpdate }: Props) {
     onUpdate();
   }
 
+  // 14-day dot array: index 0 = 13 days ago, index 13 = today
+  const today = startOfDay(new Date());
+  const dots = Array.from({ length: 14 }, (_, i) => {
+    const day = subDays(today, 13 - i);
+    const log = habit.logs.find((l) => isSameDay(new Date(l.date), day));
+    return { day, log };
+  });
+
   return (
     <Card className="hover:shadow-sm transition-shadow">
       <CardContent className="p-4">
+        {/* Header */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-semibold text-sm truncate">{habit.name}</h3>
-              <Badge variant={habit.type === "QUIT" ? "destructive" : "secondary"} className="text-xs shrink-0">
+              <Badge
+                variant={habit.type === "QUIT" ? "destructive" : "secondary"}
+                className="text-xs shrink-0"
+              >
                 {habit.type === "QUIT" ? "Quit" : "Build"}
               </Badge>
+              {currentMilestone && (
+                <span className="flex items-center gap-0.5 text-xs text-yellow-500 font-medium">
+                  <Trophy className="h-3 w-3" />
+                  {currentMilestone.label}
+                </span>
+              )}
             </div>
             {habit.description && (
               <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
@@ -72,7 +118,7 @@ export function HabitCard({ habit, onUpdate }: Props) {
 
           <div className="flex items-center gap-1 shrink-0">
             {streak > 0 && (
-              <span className="flex items-center gap-0.5 text-orange-500 text-sm font-semibold">
+              <span className="flex items-center gap-0.5 text-orange-500 text-sm font-bold">
                 <Flame className="h-3.5 w-3.5" />
                 {streak}
               </span>
@@ -80,6 +126,28 @@ export function HabitCard({ habit, onUpdate }: Props) {
           </div>
         </div>
 
+        {/* 14-day dot timeline */}
+        <div className="flex gap-0.5 mt-3">
+          {dots.map(({ day, log }, i) => {
+            let cls = "h-3.5 flex-1 rounded-sm ";
+            if (!log) cls += "bg-muted opacity-40";
+            else if (log.kept) cls += "bg-orange-500";
+            else cls += "bg-red-500/70";
+            return (
+              <div
+                key={i}
+                className={cls}
+                title={`${day.toLocaleDateString()}: ${log ? (log.kept ? "Kept" : "Missed") : "No log"}`}
+              />
+            );
+          })}
+        </div>
+        <div className="flex justify-between text-[10px] text-muted-foreground mt-0.5 px-0.5">
+          <span>14 days ago</span>
+          <span>today</span>
+        </div>
+
+        {/* Action buttons */}
         <div className="flex items-center justify-between mt-3">
           <div className="flex gap-2">
             <Button
@@ -114,10 +182,25 @@ export function HabitCard({ habit, onUpdate }: Props) {
           </Button>
         </div>
 
-        {habit.targetDays && streak > 0 && (
+        {/* Progress toward next milestone */}
+        {nextMilestone && streak > 0 && (
           <div className="mt-2">
             <div className="flex justify-between text-xs text-muted-foreground mb-1">
-              <span>Progress</span>
+              <span>Next: {nextMilestone.label}</span>
+              <span>{streak}/{nextMilestone.days} days</span>
+            </div>
+            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-orange-500 rounded-full transition-all"
+                style={{ width: `${Math.min(100, (streak / nextMilestone.days) * 100)}%` }}
+              />
+            </div>
+          </div>
+        )}
+        {!nextMilestone && habit.targetDays && streak > 0 && (
+          <div className="mt-2">
+            <div className="flex justify-between text-xs text-muted-foreground mb-1">
+              <span>Goal</span>
               <span>{streak}/{habit.targetDays} days</span>
             </div>
             <div className="h-1.5 bg-muted rounded-full overflow-hidden">

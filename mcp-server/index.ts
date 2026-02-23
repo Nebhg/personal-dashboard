@@ -288,6 +288,93 @@ server.tool(
 );
 
 server.tool(
+  "create_habit",
+  "Create a new habit to track (BUILD a positive habit or QUIT a bad one)",
+  {
+    name: z.string().describe("Habit name, e.g. 'Daily meditation'"),
+    type: z.enum(["BUILD", "QUIT"]).describe("BUILD = positive habit to form, QUIT = bad habit to break"),
+    description: z.string().optional(),
+    targetDays: z.coerce.number().int().optional().describe("Goal streak length in days, e.g. 30 or 66"),
+  },
+  async ({ name, type, description, targetDays }) => {
+    const isoNow = new Date().toISOString();
+    const habitId = uid();
+
+    await db.execute({
+      sql: `INSERT INTO "Habit" (id, name, type, description, startDate, targetDays, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [habitId, name, type, description ?? null, isoNow, targetDays ?? null, isoNow, isoNow],
+    });
+
+    return {
+      content: [{
+        type: "text" as const,
+        text: `Created habit "${name}" (${type}, ID: ${habitId}). Use check_habit with this ID to log it each day.`,
+      }],
+    };
+  }
+);
+
+server.tool(
+  "update_habit",
+  "Edit an existing habit's name, type, description, or target days",
+  {
+    habitId: z.string().describe("The habit ID (use get_habits to find IDs)"),
+    name: z.string().optional(),
+    type: z.enum(["BUILD", "QUIT"]).optional(),
+    description: z.string().optional(),
+    targetDays: z.coerce.number().int().optional().describe("New goal streak length in days"),
+  },
+  async ({ habitId, name, type, description, targetDays }) => {
+    const habitRes = await db.execute({ sql: `SELECT * FROM "Habit" WHERE id = ?`, args: [habitId] });
+    if (habitRes.rows.length === 0) return { content: [{ type: "text" as const, text: "Habit not found" }] };
+
+    const isoNow = new Date().toISOString();
+    const current = habitRes.rows[0];
+
+    await db.execute({
+      sql: `UPDATE "Habit" SET name = ?, type = ?, description = ?, targetDays = ?, updatedAt = ? WHERE id = ?`,
+      args: [
+        name ?? current.name,
+        type ?? current.type,
+        description !== undefined ? description : current.description,
+        targetDays !== undefined ? targetDays : current.targetDays,
+        isoNow,
+        habitId,
+      ],
+    });
+
+    return {
+      content: [{ type: "text" as const, text: `Updated habit "${name ?? current.name}"` }],
+    };
+  }
+);
+
+server.tool(
+  "delete_habit",
+  "Permanently delete a habit and all its logs",
+  {
+    habitId: z.string().describe("The habit ID (use get_habits to find IDs)"),
+  },
+  async ({ habitId }) => {
+    const habitRes = await db.execute({ sql: `SELECT name FROM "Habit" WHERE id = ?`, args: [habitId] });
+    if (habitRes.rows.length === 0) return { content: [{ type: "text" as const, text: "Habit not found" }] };
+    const name = habitRes.rows[0].name;
+
+    // Delete CalendarEvents linked to HabitLogs first, then logs, then habit
+    await db.batch([
+      {
+        sql: `DELETE FROM "CalendarEvent" WHERE habitLogId IN (SELECT id FROM "HabitLog" WHERE habitId = ?)`,
+        args: [habitId],
+      },
+      { sql: `DELETE FROM "HabitLog" WHERE habitId = ?`, args: [habitId] },
+      { sql: `DELETE FROM "Habit" WHERE id = ?`, args: [habitId] },
+    ]);
+
+    return { content: [{ type: "text" as const, text: `Deleted habit "${name}"` }] };
+  }
+);
+
+server.tool(
   "get_calendar_events",
   "Get calendar events for a date range",
   {
@@ -536,7 +623,9 @@ server.tool(
     return {
       content: [{
         type: "text" as const,
-        text: `Created recipe "${name}" (${recipeId})${calories ? ` — ${calories} kcal per serving` : ""}. It is now visible in the recipe library.`,
+        text: `Created recipe "${name}" (ID: ${recipeId})${calories ? ` — ${calories} kcal per serving` : ""}.
+
+Now ask the user: "Which days and meals would you like to add **${name}** to your meal plan? For example: Monday dinner, Wednesday lunch." Then call \`set_meal_plan_entry\` for each slot they mention, using recipeId: "${recipeId}".`,
       }],
     };
   }

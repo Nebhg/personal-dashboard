@@ -15,7 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Dumbbell, Trash2, Clock, ClipboardList, CalendarDays } from "lucide-react";
+import { Plus, Dumbbell, Trash2, Clock, ClipboardList, CalendarDays, Pencil } from "lucide-react";
 import { format } from "date-fns";
 
 interface ExerciseSet {
@@ -69,6 +69,8 @@ export default function ExercisePage() {
   const [plans, setPlans] = useState<WorkoutPlan[]>([]);
   const [logOpen, setLogOpen] = useState(false);
   const [newPlanOpen, setNewPlanOpen] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<WorkoutPlan | null>(null);
+  const [editPlanOpen, setEditPlanOpen] = useState(false);
 
   const loadWorkouts = useCallback(async () => {
     const res = await fetch("/api/exercise");
@@ -128,7 +130,7 @@ export default function ExercisePage() {
           </TabsTrigger>
           <TabsTrigger value="plans" className="gap-1.5">
             <ClipboardList className="h-3.5 w-3.5" />
-            Plans
+            Workouts
           </TabsTrigger>
           <TabsTrigger value="sessions" className="gap-1.5">
             <Clock className="h-3.5 w-3.5" />
@@ -148,23 +150,44 @@ export default function ExercisePage() {
               <DialogTrigger asChild>
                 <Button size="sm" className="gap-1">
                   <Plus className="h-4 w-4" />
-                  New Plan
+                  New Workout
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-3xl">
                 <DialogHeader>
-                  <DialogTitle>Create Workout Plan</DialogTitle>
+                  <DialogTitle>Create Workout</DialogTitle>
                 </DialogHeader>
                 <WorkoutPlanForm onSuccess={() => { setNewPlanOpen(false); loadPlans(); }} />
               </DialogContent>
             </Dialog>
           </div>
 
+          {/* Edit dialog — controlled externally via setEditingPlan */}
+          <Dialog open={editPlanOpen} onOpenChange={setEditPlanOpen}>
+            <DialogContent className="max-w-3xl">
+              <DialogHeader>
+                <DialogTitle>Edit Workout</DialogTitle>
+              </DialogHeader>
+              {editingPlan && (
+                <WorkoutPlanForm
+                  planId={editingPlan.id}
+                  initialValues={{
+                    name: editingPlan.name,
+                    description: editingPlan.description ?? "",
+                    scheduledDays: (() => { try { return JSON.parse(editingPlan.scheduledDays); } catch { return []; } })(),
+                    exercises: editingPlan.exercises,
+                  }}
+                  onSuccess={() => { setEditPlanOpen(false); loadPlans(); }}
+                />
+              )}
+            </DialogContent>
+          </Dialog>
+
           {plans.length === 0 && (
             <div className="text-center py-16 text-muted-foreground">
               <ClipboardList className="h-12 w-12 mx-auto mb-3 opacity-20" />
-              <p className="font-medium">No workout plans yet</p>
-              <p className="text-sm mt-1">Create a plan and assign it to days to build your schedule</p>
+              <p className="font-medium">No workouts yet</p>
+              <p className="text-sm mt-1">Create a workout and assign it to days to build your schedule</p>
             </div>
           )}
 
@@ -189,14 +212,24 @@ export default function ExercisePage() {
                           {dayLabels && <span className="text-primary">· {dayLabels}</span>}
                         </div>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                        onClick={() => deletePlan(plan.id)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      <div className="flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-primary"
+                          onClick={() => { setEditingPlan(plan); setEditPlanOpen(true); }}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => deletePlan(plan.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="pt-0">

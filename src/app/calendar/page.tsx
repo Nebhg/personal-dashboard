@@ -2,28 +2,40 @@ import { prisma } from "@/lib/prisma";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { startOfMonth, endOfMonth } from "date-fns";
 import { type CalendarEventDTO } from "@/types";
+import { generateScheduleEvents } from "@/lib/calendar-utils";
 import { Calendar } from "lucide-react";
 
 export default async function CalendarPage() {
   const now = new Date();
-  const events = await prisma.calendarEvent.findMany({
-    where: {
-      start: { gte: startOfMonth(now) },
-      end: { lte: endOfMonth(now) },
-    },
-    orderBy: { start: "asc" },
-  });
+  const monthStart = startOfMonth(now);
+  const monthEnd = endOfMonth(now);
 
-  const serialized: CalendarEventDTO[] = events.map((e) => ({
-    id: e.id,
-    title: e.title,
-    start: e.start.toISOString(),
-    end: e.end.toISOString(),
-    allDay: e.allDay,
-    area: e.area as CalendarEventDTO["area"],
-    color: e.color,
-    description: e.description,
-  }));
+  const [storedEvents, workoutPlans, mealPlanEntries] = await Promise.all([
+    prisma.calendarEvent.findMany({
+      where: { start: { gte: monthStart }, end: { lte: monthEnd } },
+      orderBy: { start: "asc" },
+    }),
+    prisma.workoutPlan.findMany({ select: { id: true, name: true, scheduledDays: true } }),
+    prisma.mealPlanEntry.findMany({
+      include: { recipe: { select: { name: true, calories: true } } },
+    }),
+  ]);
+
+  const virtualEvents = generateScheduleEvents(monthStart, monthEnd, workoutPlans, mealPlanEntries);
+
+  const serialized: CalendarEventDTO[] = [
+    ...storedEvents.map((e) => ({
+      id: e.id,
+      title: e.title,
+      start: e.start.toISOString(),
+      end: e.end.toISOString(),
+      allDay: e.allDay,
+      area: e.area as CalendarEventDTO["area"],
+      color: e.color,
+      description: e.description,
+    })),
+    ...virtualEvents,
+  ];
 
   return (
     <div className="p-6">

@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { habitSchema } from "@/lib/validations/habits";
-import { startOfDay } from "date-fns";
+import { startOfDay, subDays } from "date-fns";
 
 export async function GET() {
-  const today = startOfDay(new Date());
+  const since = subDays(startOfDay(new Date()), 90);
 
   const habits = await prisma.habit.findMany({
     orderBy: { createdAt: "asc" },
     include: {
       logs: {
-        where: { date: { gte: today } },
-        take: 1,
+        where: { date: { gte: since } },
+        orderBy: { date: "desc" },
       },
     },
   });
