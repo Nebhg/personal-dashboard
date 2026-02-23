@@ -23,19 +23,48 @@ import {
 } from "@/components/ui/select";
 import { format } from "date-fns";
 
-interface Props {
-  onSuccess: () => void;
+interface Recipe {
+  id: string;
+  name: string;
+  calories: number | null;
+  protein: number | null;
+  carbs: number | null;
+  fat: number | null;
 }
 
-export function MealLogForm({ onSuccess }: Props) {
+interface Props {
+  onSuccess: () => void;
+  recipes?: Recipe[];
+  initialRecipe?: Recipe;
+  initialMealType?: string;
+  initialDescription?: string;
+}
+
+export function MealLogForm({ onSuccess, recipes = [], initialRecipe, initialMealType, initialDescription }: Props) {
   const form = useForm<MealFormValues>({
     resolver: zodResolver(mealSchema),
     defaultValues: {
       date: new Date(),
-      mealType: "breakfast",
-      description: "",
+      mealType: (initialMealType as MealFormValues["mealType"]) ?? "breakfast",
+      description: initialRecipe?.name ?? initialDescription ?? "",
+      calories: initialRecipe?.calories ?? null,
+      protein: initialRecipe?.protein ?? null,
+      carbs: initialRecipe?.carbs ?? null,
+      fat: initialRecipe?.fat ?? null,
+      recipeId: initialRecipe?.id ?? null,
     },
   });
+
+  function applyRecipe(recipeId: string) {
+    const recipe = recipes.find((r) => r.id === recipeId);
+    if (!recipe) return;
+    form.setValue("description", recipe.name);
+    form.setValue("calories", recipe.calories);
+    form.setValue("protein", recipe.protein);
+    form.setValue("carbs", recipe.carbs);
+    form.setValue("fat", recipe.fat);
+    form.setValue("recipeId", recipe.id);
+  }
 
   async function onSubmit(values: MealFormValues) {
     const res = await fetch("/api/diet", {
@@ -52,6 +81,25 @@ export function MealLogForm({ onSuccess }: Props) {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        {recipes.length > 0 && (
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">From recipe (optional)</label>
+            <Select onValueChange={applyRecipe} defaultValue={initialRecipe?.id}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a recipe to auto-fill..." />
+              </SelectTrigger>
+              <SelectContent>
+                {recipes.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>
+                    {r.name}
+                    {r.calories ? ` · ${r.calories} kcal` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
           <FormField
             control={form.control}

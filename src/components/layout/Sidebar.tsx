@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   Calendar,
@@ -10,6 +11,8 @@ import {
   BookOpen,
   Target,
   MessageSquare,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -25,9 +28,24 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [isDark, setIsDark] = useState(true);
+
+  useEffect(() => {
+    const stored = localStorage.getItem("theme");
+    const dark = stored !== "light";
+    setIsDark(dark);
+    document.documentElement.classList.toggle("dark", dark);
+  }, []);
+
+  function toggleTheme() {
+    const next = !isDark;
+    setIsDark(next);
+    document.documentElement.classList.toggle("dark", next);
+    localStorage.setItem("theme", next ? "dark" : "light");
+  }
 
   return (
-    <aside className="fixed left-0 top-0 h-full w-56 border-r bg-card flex flex-col z-10">
+    <aside className="fixed left-0 top-0 h-full w-56 border-r bg-sidebar flex flex-col z-10">
       <div className="p-5 border-b">
         <h1 className="font-bold text-lg tracking-tight">My Dashboard</h1>
         <p className="text-xs text-muted-foreground mt-0.5">Lifestyle tracker</p>
@@ -51,7 +69,14 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="p-3 border-t">
+      <div className="p-3 border-t space-y-2">
+        <button
+          onClick={toggleTheme}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+        >
+          {isDark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+          {isDark ? "Light mode" : "Dark mode"}
+        </button>
         <p className="text-xs text-muted-foreground text-center">
           {new Date().toLocaleDateString("en-US", {
             weekday: "long",

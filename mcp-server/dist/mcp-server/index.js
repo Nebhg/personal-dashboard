@@ -9,7 +9,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbUrl = process.env.DATABASE_URL ??
-    `file:${path.resolve(__dirname, "../prisma/dev.db")}`;
+    `file:${path.resolve(__dirname, "../../../prisma/dev.db")}`;
 const adapter = new PrismaLibSql({ url: dbUrl });
 const prisma = new PrismaClient({ adapter });
 function calculateStreak(logs) {
@@ -313,6 +313,285 @@ server.tool("get_trends", "Get weekly/monthly summary statistics", {
             },
         ],
     };
+});
+server.tool("get_recipes", "Get all recipes from the recipe library with ingredients and macro info", {}, async () => {
+    const recipes = await prisma.recipe.findMany({
+        include: {
+            ingredients: { orderBy: { order: "asc" } },
+            steps: { orderBy: { stepNum: "asc" } },
+        },
+        orderBy: { name: "asc" },
+    });
+    const result = recipes.map((r) => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        prepTimeMins: r.prepTimeMins,
+        cookTimeMins: r.cookTimeMins,
+        servings: r.servings,
+        macros: { calories: r.calories, protein: r.protein, carbs: r.carbs, fat: r.fat },
+        ingredients: r.ingredients.map((i) => ({ name: i.name, amount: i.amount })),
+        steps: r.steps.map((s) => ({ step: s.stepNum, text: s.text })),
+    }));
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+});
+server.tool("get_workout_plans", "Get all workout plan templates with their exercise tables", {}, async () => {
+    const plans = await prisma.workoutPlan.findMany({
+        include: { exercises: { orderBy: { order: "asc" } } },
+        orderBy: { name: "asc" },
+    });
+    const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const result = plans.map((p) => {
+        let scheduledDays = [];
+        try {
+            scheduledDays = JSON.parse(p.scheduledDays);
+        }
+        catch {
+            scheduledDays = [];
+        }
+        return {
+            id: p.id,
+            name: p.name,
+            description: p.description,
+            scheduledDays: scheduledDays.map((d) => DAY_NAMES[d]).join(", ") || "None",
+            exercises: p.exercises.map((ex) => ({
+                name: ex.name,
+                sets: ex.sets,
+                reps: ex.reps,
+                weightKg: ex.weightKg,
+                restSec: ex.restSec,
+                notes: ex.notes,
+            })),
+        };
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+});
+server.tool("create_workout_plan", "Create a new workout plan template with exercises and which days of the week it's scheduled", {
+    name: z.string().describe("Plan name, e.g. 'Push Day A'"),
+    description: z.string().optional(),
+    scheduledDays: z.array(z.number().int().min(0).max(6)).describe("Days of week to schedule this plan (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)"),
+    exercises: z.array(z.object({
+        name: z.string().describe("Exercise name, e.g. 'Bench Press'"),
+        sets: z.number().int().optional(),
+        reps: z.number().int().optional(),
+        weightKg: z.number().optional(),
+        restSec: z.number().int().optional().describe("Rest period in seconds"),
+        notes: z.string().optional().describe("e.g. 'RPE 8', 'to failure'"),
+    })).describe("List of exercises for this plan"),
+}, async ({ name, description, scheduledDays, exercises }) => {
+    const plan = await prisma.workoutPlan.create({
+        data: {
+            name,
+            description: description ?? null,
+            scheduledDays: JSON.stringify(scheduledDays ?? []),
+            exercises: {
+                create: exercises.map((ex, i) => ({
+                    name: ex.name,
+                    sets: ex.sets ?? null,
+                    reps: ex.reps ?? null,
+                    weightKg: ex.weightKg ?? null,
+                    restSec: ex.restSec ?? null,
+                    notes: ex.notes ?? null,
+                    order: i,
+                })),
+            },
+        },
+        include: { exercises: true },
+    });
+    const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dayStr = scheduledDays.map((d) => DAY_NAMES[d]).join(", ");
+    return {
+        content: [{
+                type: "text",
+                text: `Created workout plan "${plan.name}" (${plan.id}) scheduled on: ${dayStr || "no days set"}. ${plan.exercises.length} exercises added.`,
+            }],
+    };
+});
+server.tool("create_recipe", "Add a new recipe to the recipe library with ingredients, steps, and nutritional info", {
+    name: z.string().describe("Recipe name"),
+    description: z.string().optional(),
+    prepTimeMins: z.number().int().optional(),
+    cookTimeMins: z.number().int().optional(),
+    servings: z.number().int().optional(),
+    calories: z.number().int().optional().describe("Calories per serving"),
+    protein: z.number().int().optional().describe("Protein in grams per serving"),
+    carbs: z.number().int().optional().describe("Carbs in grams per serving"),
+    fat: z.number().int().optional().describe("Fat in grams per serving"),
+    notes: z.string().optional(),
+    ingredients: z.array(z.object({
+        name: z.string(),
+        amount: z.string().optional().describe("e.g. '200g', '1 cup', '2 tbsp'"),
+    })).optional(),
+    steps: z.array(z.string()).optional().describe("Ordered cooking steps"),
+}, async ({ name, description, prepTimeMins, cookTimeMins, servings, calories, protein, carbs, fat, notes, ingredients, steps }) => {
+    const recipe = await prisma.recipe.create({
+        data: {
+            name,
+            description: description ?? null,
+            prepTimeMins: prepTimeMins ?? null,
+            cookTimeMins: cookTimeMins ?? null,
+            servings: servings ?? null,
+            calories: calories ?? null,
+            protein: protein ?? null,
+            carbs: carbs ?? null,
+            fat: fat ?? null,
+            notes: notes ?? null,
+            ingredients: {
+                create: (ingredients ?? []).map((ing, i) => ({
+                    name: ing.name,
+                    amount: ing.amount ?? null,
+                    order: i,
+                })),
+            },
+            steps: {
+                create: (steps ?? []).map((text, i) => ({
+                    stepNum: i + 1,
+                    text,
+                })),
+            },
+        },
+    });
+    return {
+        content: [{
+                type: "text",
+                text: `Created recipe "${recipe.name}" (${recipe.id})${calories ? ` — ${calories} kcal per serving` : ""}. It is now visible in the recipe library.`,
+            }],
+    };
+});
+server.tool("set_meal_plan_entry", "Set or update a planned meal for a specific day and meal slot in the weekly meal plan", {
+    dayOfWeek: z.number().int().min(0).max(6).describe("0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat"),
+    mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
+    recipeId: z.string().optional().describe("Recipe ID from get_recipes — use this to link a recipe from the library"),
+    description: z.string().optional().describe("Free-text description if not using a recipe, e.g. 'Greek yoghurt with berries'"),
+}, async ({ dayOfWeek, mealType, recipeId, description }) => {
+    if (!recipeId && !description) {
+        return { content: [{ type: "text", text: "Error: provide either recipeId or description" }] };
+    }
+    const entry = await prisma.mealPlanEntry.upsert({
+        where: { dayOfWeek_mealType: { dayOfWeek, mealType } },
+        update: { recipeId: recipeId ?? null, description: recipeId ? null : (description ?? null) },
+        create: {
+            dayOfWeek,
+            mealType,
+            recipeId: recipeId ?? null,
+            description: recipeId ? null : (description ?? null),
+        },
+        include: { recipe: { select: { name: true } } },
+    });
+    const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const meal = entry.recipe?.name ?? description;
+    return {
+        content: [{
+                type: "text",
+                text: `Set ${mealType} on ${DAY_NAMES[dayOfWeek]} → "${meal}". Visible in the Meal Plan grid on the dashboard.`,
+            }],
+    };
+});
+server.tool("get_weekly_schedule", "Get the full weekly schedule: which workout plans are on which days, and what meals are planned each day", {}, async () => {
+    const [plans, mealPlanEntries] = await Promise.all([
+        prisma.workoutPlan.findMany({
+            include: { exercises: { orderBy: { order: "asc" } } },
+            orderBy: { name: "asc" },
+        }),
+        prisma.mealPlanEntry.findMany({
+            include: { recipe: { select: { name: true, calories: true, protein: true, carbs: true, fat: true } } },
+            orderBy: { dayOfWeek: "asc" },
+        }),
+    ]);
+    const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Mon–Sun display
+    const schedule = DISPLAY_ORDER.map((dow) => {
+        const workouts = plans
+            .filter((p) => {
+            try {
+                return JSON.parse(p.scheduledDays).includes(dow);
+            }
+            catch {
+                return false;
+            }
+        })
+            .map((p) => ({
+            plan: p.name,
+            exercises: p.exercises.map((ex) => ({
+                name: ex.name,
+                sets: ex.sets,
+                reps: ex.reps,
+                weightKg: ex.weightKg ? `${ex.weightKg}kg` : null,
+            })),
+        }));
+        const meals = mealPlanEntries
+            .filter((e) => e.dayOfWeek === dow)
+            .map((e) => ({
+            mealType: e.mealType,
+            meal: e.recipe?.name ?? e.description,
+            calories: e.recipe?.calories ?? null,
+        }));
+        return { day: DAY_NAMES[dow], workouts, meals };
+    });
+    return { content: [{ type: "text", text: JSON.stringify(schedule, null, 2) }] };
+});
+server.tool("create_schedule_block", "Add a time block to the calendar (gym session, work, sleep, learning time, commute, etc.)", {
+    title: z.string().describe("Block title, e.g. 'Morning gym', 'Deep work', 'Sleep'"),
+    category: z.enum(["GYM", "LEARNING", "SLEEP", "WORK", "COMMUTE", "PERSONAL"]),
+    start: z.string().describe("ISO 8601 datetime, e.g. 2026-02-23T07:00:00"),
+    end: z.string().describe("ISO 8601 datetime, e.g. 2026-02-23T08:30:00"),
+    allDay: z.boolean().default(false),
+    notes: z.string().optional(),
+}, async ({ title, category, start, end, allDay, notes }) => {
+    const CATEGORY_COLORS = {
+        GYM: "#3b82f6",
+        LEARNING: "#a855f7",
+        SLEEP: "#64748b",
+        WORK: "#0ea5e9",
+        COMMUTE: "#f59e0b",
+        PERSONAL: "#ec4899",
+    };
+    const color = CATEGORY_COLORS[category] ?? "#6366f1";
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    const block = await prisma.scheduleBlock.create({
+        data: {
+            title,
+            start: startDate,
+            end: endDate,
+            allDay,
+            category,
+            color,
+            notes: notes ?? null,
+            calendarEvent: {
+                create: {
+                    title,
+                    start: startDate,
+                    end: endDate,
+                    allDay,
+                    area: "SCHEDULE",
+                    color,
+                    description: notes ?? null,
+                },
+            },
+        },
+    });
+    return { content: [{ type: "text", text: `Created schedule block: ${block.id} — ${title} (${category})` }] };
+});
+server.tool("get_upcoming_schedule", "Get scheduled time blocks for the next N days", {
+    days: z.number().default(7).describe("Number of days ahead to look (default 7)"),
+}, async ({ days }) => {
+    const now = startOfDay(new Date());
+    const until = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+    const blocks = await prisma.scheduleBlock.findMany({
+        where: { start: { gte: now, lte: until } },
+        orderBy: { start: "asc" },
+    });
+    const result = blocks.map((b) => ({
+        id: b.id,
+        title: b.title,
+        category: b.category,
+        start: format(b.start, "yyyy-MM-dd HH:mm"),
+        end: format(b.end, "yyyy-MM-dd HH:mm"),
+        allDay: b.allDay,
+        notes: b.notes,
+    }));
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
 });
 // ─── START SERVER ─────────────────────────────────────────────────────────────
 async function main() {

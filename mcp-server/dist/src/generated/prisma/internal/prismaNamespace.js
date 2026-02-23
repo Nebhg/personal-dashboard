@@ -48,7 +48,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.defineExtension = exports.NullsOrder = exports.SortOrder = exports.HabitLogScalarFieldEnum = exports.HabitScalarFieldEnum = exports.BookScalarFieldEnum = exports.LearningSessionScalarFieldEnum = exports.ExerciseSetScalarFieldEnum = exports.WorkoutSessionScalarFieldEnum = exports.DietGoalScalarFieldEnum = exports.MealLogScalarFieldEnum = exports.CalendarEventScalarFieldEnum = exports.TransactionIsolationLevel = exports.ModelName = exports.AnyNull = exports.JsonNull = exports.DbNull = exports.NullTypes = exports.prismaVersion = exports.getExtensionContext = exports.Decimal = exports.Sql = exports.raw = exports.join = exports.empty = exports.sql = exports.PrismaClientValidationError = exports.PrismaClientInitializationError = exports.PrismaClientRustPanicError = exports.PrismaClientUnknownRequestError = exports.PrismaClientKnownRequestError = void 0;
+exports.defineExtension = exports.NullsOrder = exports.SortOrder = exports.ScheduleBlockScalarFieldEnum = exports.HabitLogScalarFieldEnum = exports.HabitScalarFieldEnum = exports.BookScalarFieldEnum = exports.LearningSessionScalarFieldEnum = exports.ExerciseSetScalarFieldEnum = exports.WorkoutSessionScalarFieldEnum = exports.WorkoutPlanExerciseScalarFieldEnum = exports.WorkoutPlanScalarFieldEnum = exports.DietGoalScalarFieldEnum = exports.RecipeIngredientScalarFieldEnum = exports.RecipeStepScalarFieldEnum = exports.MealPlanEntryScalarFieldEnum = exports.RecipeScalarFieldEnum = exports.MealLogScalarFieldEnum = exports.CalendarEventScalarFieldEnum = exports.TransactionIsolationLevel = exports.ModelName = exports.AnyNull = exports.JsonNull = exports.DbNull = exports.NullTypes = exports.prismaVersion = exports.getExtensionContext = exports.Decimal = exports.Sql = exports.raw = exports.join = exports.empty = exports.sql = exports.PrismaClientValidationError = exports.PrismaClientInitializationError = exports.PrismaClientRustPanicError = exports.PrismaClientUnknownRequestError = exports.PrismaClientKnownRequestError = void 0;
 const runtime = __importStar(require("@prisma/client/runtime/client"));
 /**
  * Prisma Errors
@@ -105,13 +105,20 @@ exports.AnyNull = runtime.AnyNull;
 exports.ModelName = {
     CalendarEvent: 'CalendarEvent',
     MealLog: 'MealLog',
+    Recipe: 'Recipe',
+    MealPlanEntry: 'MealPlanEntry',
+    RecipeStep: 'RecipeStep',
+    RecipeIngredient: 'RecipeIngredient',
     DietGoal: 'DietGoal',
+    WorkoutPlan: 'WorkoutPlan',
+    WorkoutPlanExercise: 'WorkoutPlanExercise',
     WorkoutSession: 'WorkoutSession',
     ExerciseSet: 'ExerciseSet',
     LearningSession: 'LearningSession',
     Book: 'Book',
     Habit: 'Habit',
-    HabitLog: 'HabitLog'
+    HabitLog: 'HabitLog',
+    ScheduleBlock: 'ScheduleBlock'
 };
 /**
  * Enums
@@ -132,6 +139,7 @@ exports.CalendarEventScalarFieldEnum = {
     workoutSessionId: 'workoutSessionId',
     learningSessionId: 'learningSessionId',
     habitLogId: 'habitLogId',
+    scheduleBlockId: 'scheduleBlockId',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt'
 };
@@ -145,8 +153,46 @@ exports.MealLogScalarFieldEnum = {
     carbs: 'carbs',
     fat: 'fat',
     notes: 'notes',
+    recipeId: 'recipeId',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt'
+};
+exports.RecipeScalarFieldEnum = {
+    id: 'id',
+    name: 'name',
+    description: 'description',
+    prepTimeMins: 'prepTimeMins',
+    cookTimeMins: 'cookTimeMins',
+    servings: 'servings',
+    calories: 'calories',
+    protein: 'protein',
+    carbs: 'carbs',
+    fat: 'fat',
+    notes: 'notes',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
+exports.MealPlanEntryScalarFieldEnum = {
+    id: 'id',
+    dayOfWeek: 'dayOfWeek',
+    mealType: 'mealType',
+    recipeId: 'recipeId',
+    description: 'description',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
+exports.RecipeStepScalarFieldEnum = {
+    id: 'id',
+    recipeId: 'recipeId',
+    stepNum: 'stepNum',
+    text: 'text'
+};
+exports.RecipeIngredientScalarFieldEnum = {
+    id: 'id',
+    recipeId: 'recipeId',
+    name: 'name',
+    amount: 'amount',
+    order: 'order'
 };
 exports.DietGoalScalarFieldEnum = {
     id: 'id',
@@ -156,6 +202,25 @@ exports.DietGoalScalarFieldEnum = {
     targetFat: 'targetFat',
     activeFrom: 'activeFrom',
     createdAt: 'createdAt'
+};
+exports.WorkoutPlanScalarFieldEnum = {
+    id: 'id',
+    name: 'name',
+    description: 'description',
+    scheduledDays: 'scheduledDays',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
+exports.WorkoutPlanExerciseScalarFieldEnum = {
+    id: 'id',
+    planId: 'planId',
+    name: 'name',
+    sets: 'sets',
+    reps: 'reps',
+    weightKg: 'weightKg',
+    restSec: 'restSec',
+    notes: 'notes',
+    order: 'order'
 };
 exports.WorkoutSessionScalarFieldEnum = {
     id: 'id',
@@ -218,6 +283,18 @@ exports.HabitLogScalarFieldEnum = {
     kept: 'kept',
     notes: 'notes',
     createdAt: 'createdAt'
+};
+exports.ScheduleBlockScalarFieldEnum = {
+    id: 'id',
+    title: 'title',
+    start: 'start',
+    end: 'end',
+    allDay: 'allDay',
+    category: 'category',
+    color: 'color',
+    notes: 'notes',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
 };
 exports.SortOrder = {
     asc: 'asc',

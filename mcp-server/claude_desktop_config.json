@@ -1,0 +1,12 @@
+{
+  "_instructions": "Copy the 'mcpServers' block into ~/Library/Application Support/Claude/claude_desktop_config.json then restart Claude Desktop. Replace ABSOLUTE_PATH with the real path to this project.",
+  "mcpServers": {
+    "personal-dashboard": {
+      "command": "node",
+      "args": ["/Users/haras-gummer/personal-dashboard/mcp-server/dist/index.js"],
+      "env": {
+        "DATABASE_URL": "file:/Users/haras-gummer/personal-dashboard/prisma/dev.db"
+      }
+    }
+  }
+}

@@ -24,19 +24,36 @@ import {
 import { Plus, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 
-interface Props {
-  onSuccess: () => void;
+interface PlanExercise {
+  name: string;
+  sets: number | null;
+  reps: number | null;
+  weightKg: number | null;
+  order: number;
 }
 
-export function WorkoutForm({ onSuccess }: Props) {
+interface Props {
+  onSuccess: () => void;
+  initialName?: string;
+  initialExercises?: PlanExercise[];
+}
+
+export function WorkoutForm({ onSuccess, initialName, initialExercises }: Props) {
   const form = useForm<WorkoutFormValues>({
     resolver: zodResolver(workoutSchema),
     defaultValues: {
       date: new Date(),
-      name: "",
+      name: initialName ?? "",
       type: "strength",
       durationMin: 45,
-      exercises: [],
+      exercises: initialExercises?.map((ex, i) => ({
+        name: ex.name,
+        sets: ex.sets,
+        reps: ex.reps,
+        weightKg: ex.weightKg,
+        distanceKm: null,
+        order: ex.order ?? i,
+      })) ?? [],
     },
   });
 

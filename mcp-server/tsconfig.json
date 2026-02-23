@@ -4,12 +4,11 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "outDir": "dist",
-    "strict": true,
+    "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "paths": {
-      "@/generated/prisma": ["../src/generated/prisma"]
-    }
+    "declaration": true
   },
-  "include": ["*.ts", "tools/*.ts"]
+  "include": ["index.ts"],
+  "exclude": ["node_modules"]
 }

@@ -17,7 +17,7 @@ model CalendarEvent {
   start       DateTime
   end         DateTime
   allDay      Boolean  @default(false)
-  area        String   // "DIET" | "EXERCISE" | "LEARNING" | "HABITS"
+  area        String   // "DIET" | "EXERCISE" | "LEARNING" | "HABITS" | "SCHEDULE"
   color       String?
   description String?
 
@@ -32,6 +32,9 @@ model CalendarEvent {
 
   habitLogId        String?          @unique
   habitLog          HabitLog?        @relation(fields: [habitLogId], references: [id], onDelete: Cascade)
+
+  scheduleBlockId   String?          @unique
+  scheduleBlock     ScheduleBlock?   @relation(fields: [scheduleBlockId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -51,10 +54,66 @@ model MealLog {
   carbs       Int?
   fat         Int?
   notes       String?
+  recipeId    String?
+  recipe      Recipe?  @relation(fields: [recipeId], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   calendarEvent CalendarEvent?
+}
+
+model Recipe {
+  id           String             @id @default(cuid())
+  name         String
+  description  String?
+  prepTimeMins Int?
+  cookTimeMins Int?
+  servings     Int?
+  calories     Int?
+  protein      Int?
+  carbs        Int?
+  fat          Int?
+  notes        String?
+  steps        RecipeStep[]
+  ingredients  RecipeIngredient[]
+  mealLogs     MealLog[]
+  mealPlanEntries MealPlanEntry[]
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+}
+
+// ─────────────────────────────────────────
+// MEAL PLAN (weekly template)
+// ─────────────────────────────────────────
+
+model MealPlanEntry {
+  id          String   @id @default(cuid())
+  dayOfWeek   Int      // 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+  mealType    String   // "breakfast" | "lunch" | "dinner" | "snack"
+  recipeId    String?
+  recipe      Recipe?  @relation(fields: [recipeId], references: [id], onDelete: SetNull)
+  description String?  // free-text for non-recipe entries
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([dayOfWeek, mealType])
+}
+
+model RecipeStep {
+  id       String @id @default(cuid())
+  recipe   Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  recipeId String
+  stepNum  Int
+  text     String
+}
+
+model RecipeIngredient {
+  id       String  @id @default(cuid())
+  recipe   Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  recipeId String
+  name     String
+  amount   String?
+  order    Int     @default(0)
 }
 
 model DietGoal {
@@ -70,6 +129,29 @@ model DietGoal {
 // ─────────────────────────────────────────
 // EXERCISE / GYM
 // ─────────────────────────────────────────
+
+model WorkoutPlan {
+  id            String               @id @default(cuid())
+  name          String
+  description   String?
+  scheduledDays String               @default("[]") // JSON array of 0-6 (0=Sun,1=Mon,...,6=Sat)
+  exercises     WorkoutPlanExercise[]
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+}
+
+model WorkoutPlanExercise {
+  id        String      @id @default(cuid())
+  plan      WorkoutPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  planId    String
+  name      String
+  sets      Int?
+  reps      Int?
+  weightKg  Float?
+  restSec   Int?
+  notes     String?
+  order     Int         @default(0)
+}
 
 model WorkoutSession {
   id          String        @id @default(cuid())
@@ -157,4 +239,23 @@ model HabitLog {
   calendarEvent CalendarEvent?
 
   @@unique([habitId, date])
+}
+
+// ─────────────────────────────────────────
+// SCHEDULE BLOCKS (manual calendar events)
+// ─────────────────────────────────────────
+
+model ScheduleBlock {
+  id        String   @id @default(cuid())
+  title     String
+  start     DateTime
+  end       DateTime
+  allDay    Boolean  @default(false)
+  category  String   // "GYM" | "LEARNING" | "SLEEP" | "WORK" | "COMMUTE" | "PERSONAL"
+  color     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  calendarEvent CalendarEvent?
 }
