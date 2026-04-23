@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   Utensils,
   Dumbbell,
-  BookOpen,
   Target,
   Flame,
   TrendingUp,
@@ -24,14 +23,11 @@ export default async function DashboardPage() {
   const weekStart = startOfWeek(now, { weekStartsOn: 1 });
   const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
 
-  const [todayMeals, weekWorkouts, weekSessions, habitsWithLogs, activeApplications] = await Promise.all([
+  const [todayMeals, weekWorkouts, habitsWithLogs, activeApplications] = await Promise.all([
     prisma.mealLog.findMany({
       where: { date: { gte: todayStart, lte: todayEnd } },
     }),
     prisma.workoutSession.findMany({
-      where: { date: { gte: weekStart, lte: weekEnd } },
-    }),
-    prisma.learningSession.findMany({
       where: { date: { gte: weekStart, lte: weekEnd } },
     }),
     prisma.habit.findMany({
@@ -50,7 +46,6 @@ export default async function DashboardPage() {
 
   const todayCalories = todayMeals.reduce((s, m) => s + (m.calories ?? 0), 0);
   const weekWorkoutMin = weekWorkouts.reduce((s, w) => s + w.durationMin, 0);
-  const weekLearnMin = weekSessions.reduce((s, s2) => s + s2.durationMin, 0);
 
   const habitStreaks = habitsWithLogs.map((h) => ({
     ...h,
@@ -106,21 +101,7 @@ export default async function DashboardPage() {
           </Card>
         </Link>
 
-        <Link href="/learning">
-          <Card className="hover:shadow-md transition-shadow cursor-pointer">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <BookOpen className="h-4 w-4 text-purple-500" />
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Learning</span>
-              </div>
-              <p className="text-2xl font-bold">{Math.floor(weekLearnMin / 60)}h {weekLearnMin % 60}m</p>
-              <p className="text-xs text-muted-foreground">studied this week</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{weekSessions.length} sessions</p>
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href="/habits">
+<Link href="/habits">
           <Card className="hover:shadow-md transition-shadow cursor-pointer">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-2">
@@ -256,21 +237,10 @@ export default async function DashboardPage() {
                   Log Workout
                 </Badge>
               </Link>
-              <Link href="/learning">
-                <Badge variant="outline" className="cursor-pointer hover:bg-accent py-1.5 px-3">
-                  <BookOpen className="h-3.5 w-3.5 mr-1.5" />
-                  Log Learning
-                </Badge>
-              </Link>
               <Link href="/habits">
                 <Badge variant="outline" className="cursor-pointer hover:bg-accent py-1.5 px-3">
                   <Target className="h-3.5 w-3.5 mr-1.5" />
                   Check Habits
-                </Badge>
-              </Link>
-              <Link href="/ai">
-                <Badge variant="outline" className="cursor-pointer hover:bg-accent py-1.5 px-3">
-                  AI Coach
                 </Badge>
               </Link>
             </div>

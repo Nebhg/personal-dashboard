@@ -8,9 +8,7 @@ import {
   Calendar,
   Utensils,
   Dumbbell,
-  BookOpen,
   Target,
-  MessageSquare,
   Briefcase,
   Code2,
   TrendingUp,
@@ -27,9 +25,7 @@ const navItems = [
   { href: "/calendar",  label: "Calendar",  icon: Calendar },
   { href: "/diet",      label: "Diet",      icon: Utensils },
   { href: "/exercise",  label: "Exercise",  icon: Dumbbell },
-  { href: "/learning",  label: "Learning",  icon: BookOpen },
   { href: "/habits",    label: "Habits",    icon: Target },
-  { href: "/ai",        label: "AI Coach",  icon: MessageSquare },
 ];
 
 export function Sidebar() {
