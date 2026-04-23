@@ -2,16 +2,63 @@ import "dotenv/config";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { PrismaClient } from "../src/generated/prisma/client.js";
-import { PrismaLibSql } from "@prisma/adapter-libsql";
+import { createClient } from "@libsql/client";
 import { startOfDay, subDays, format } from "date-fns";
-import path from "path";
-import { fileURLToPath } from "url";
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbUrl = process.env.DATABASE_URL ??
-    `file:${path.resolve(__dirname, "../../prisma/dev.db")}`;
-const adapter = new PrismaLibSql({ url: dbUrl });
-const prisma = new PrismaClient({ adapter });
+import { randomUUID } from "crypto";
+import * as fs from "fs";
+import * as path from "path";
+const TRACKER_MD_PATH = path.join(process.env.HOME ?? "~", "career_tracker", "tracker.md");
+const STAGE_LABELS = {
+    APPLIED: "Applied", SCREEN: "Talent Screen", TECHNICAL: "Technical",
+    FINAL: "Final Round", OFFER: "Offer", REJECTED: "Rejected", GHOSTED: "Ghosted",
+};
+async function regenerateTrackerMd() {
+    try {
+        const result = await db.execute(`SELECT * FROM "JobApplication" ORDER BY
+      CASE stage WHEN 'FINAL' THEN 1 WHEN 'TECHNICAL' THEN 2 WHEN 'SCREEN' THEN 3
+      WHEN 'APPLIED' THEN 4 WHEN 'OFFER' THEN 5 ELSE 6 END, updatedAt DESC`);
+        const today = format(new Date(), "yyyy-MM-dd");
+        const active = result.rows.filter((r) => !["REJECTED", "GHOSTED"].includes(r.stage));
+        const closed = result.rows.filter((r) => ["REJECTED", "GHOSTED"].includes(r.stage));
+        const sections = [`# Career Tracker — Last updated: ${today}`, "", "---", "", "## ACTIVE PIPELINE", ""];
+        for (const a of active) {
+            const role = a.role ? ` — ${a.role}` : " — [Role TBC]";
+            sections.push(`### ${a.firm}${role}`);
+            sections.push(`- **Stage:** ${STAGE_LABELS[a.stage] ?? a.stage}`);
+            sections.push(`- **Applied:** ${a.appliedDate ? format(new Date(a.appliedDate), "yyyy-MM-dd") : "Unknown"}`);
+            sections.push(`- **Last action:** ${a.lastAction ?? "—"}`);
+            sections.push(`- **Next action:** ${a.nextAction ?? "—"}`);
+            sections.push(`- **Prep needed:** ${a.prepNeeded ? "YES" : "NO"}${a.prepNotes ? ` — ${a.prepNotes}` : ""}`);
+            sections.push(`- **Notes:** ${a.notes ?? "—"}`);
+            sections.push("", "---", "");
+        }
+        sections.push("## CLOSED / INACTIVE", "");
+        for (const a of closed) {
+            const role = a.role ?? "[Role TBC]";
+            sections.push(`- ${a.firm} — ${role} (${STAGE_LABELS[a.stage] ?? a.stage})`);
+        }
+        sections.push("", "---", "", `## LOG`, "", `- ${today} — Tracker regenerated from dashboard DB`);
+        // Preserve existing log entries if file exists
+        if (fs.existsSync(TRACKER_MD_PATH)) {
+            const existing = fs.readFileSync(TRACKER_MD_PATH, "utf-8");
+            const logMatch = existing.match(/## LOG\n([\s\S]*)/);
+            if (logMatch) {
+                const oldLog = logMatch[1].trim();
+                sections[sections.length - 1] = `- ${today} — Tracker regenerated from dashboard DB`;
+                sections.push(...oldLog.split("\n").filter((l) => l.trim() && !l.includes("Tracker regenerated")));
+            }
+        }
+        fs.writeFileSync(TRACKER_MD_PATH, sections.join("\n"), "utf-8");
+    }
+    catch (e) {
+        console.error("Failed to regenerate tracker.md:", e);
+    }
+}
+const dbUrl = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
+const db = createClient({ url: dbUrl });
+function uid() {
+    return randomUUID();
+}
 function calculateStreak(logs) {
     const kept = logs
         .filter((l) => l.kept)
@@ -19,13 +66,14 @@ function calculateStreak(logs) {
         .sort((a, b) => b.getTime() - a.getTime());
     if (kept.length === 0)
         return 0;
-    let streak = 0;
-    let check = startOfDay(new Date());
     const isSameDay = (a, b) => a.getFullYear() === b.getFullYear() &&
         a.getMonth() === b.getMonth() &&
         a.getDate() === b.getDate();
-    if (!isSameDay(kept[0], check) && !isSameDay(kept[0], subDays(check, 1)))
+    const check0 = startOfDay(new Date());
+    if (!isSameDay(kept[0], check0) && !isSameDay(kept[0], subDays(check0, 1)))
         return 0;
+    let streak = 0;
+    let check = check0;
     if (isSameDay(kept[0], check)) {
         streak = 1;
         check = subDays(check, 1);
@@ -60,31 +108,36 @@ server.tool("get_dashboard_summary", "Get a summary of today's and this week's a
     const now = new Date();
     const todayStart = startOfDay(now);
     const weekStart = subDays(todayStart, 7);
-    const [meals, workouts, sessions, habits] = await Promise.all([
-        prisma.mealLog.findMany({ where: { date: { gte: todayStart } } }),
-        prisma.workoutSession.findMany({ where: { date: { gte: weekStart } } }),
-        prisma.learningSession.findMany({ where: { date: { gte: weekStart } } }),
-        prisma.habit.findMany({
-            include: { logs: { where: { date: { gte: weekStart } }, orderBy: { date: "desc" } } },
-        }),
+    const [mealsRes, workoutsRes, sessionsRes, habitsRes, habitLogsRes] = await Promise.all([
+        db.execute({ sql: `SELECT * FROM "MealLog" WHERE date >= ?`, args: [todayStart.toISOString()] }),
+        db.execute({ sql: `SELECT * FROM "WorkoutSession" WHERE date >= ?`, args: [weekStart.toISOString()] }),
+        db.execute({ sql: `SELECT * FROM "LearningSession" WHERE date >= ?`, args: [weekStart.toISOString()] }),
+        db.execute({ sql: `SELECT * FROM "Habit"`, args: [] }),
+        db.execute({ sql: `SELECT * FROM "HabitLog" WHERE date >= ?`, args: [weekStart.toISOString()] }),
     ]);
+    const meals = mealsRes.rows;
+    const workouts = workoutsRes.rows;
+    const sessions = sessionsRes.rows;
+    const habits = habitsRes.rows;
+    const habitLogs = habitLogsRes.rows;
     const todayCalories = meals.reduce((s, m) => s + (m.calories ?? 0), 0);
-    const habitData = habits.map((h) => ({
-        name: h.name,
-        type: h.type,
-        streak: calculateStreak(h.logs.map((l) => ({ date: l.date, kept: l.kept }))),
-        todayKept: h.logs.some((l) => l.date >= todayStart && l.kept),
-    }));
+    const habitData = habits.map((h) => {
+        const logs = habitLogs
+            .filter((l) => l.habitId === h.id)
+            .map((l) => ({ date: l.date, kept: Boolean(l.kept) }));
+        return {
+            name: h.name,
+            type: h.type,
+            streak: calculateStreak(logs),
+            todayKept: logs.some((l) => new Date(l.date) >= todayStart && l.kept),
+        };
+    });
     return {
-        content: [
-            {
+        content: [{
                 type: "text",
                 text: JSON.stringify({
                     date: format(now, "yyyy-MM-dd"),
-                    diet: {
-                        todayMeals: meals.length,
-                        todayCalories,
-                    },
+                    diet: { todayMeals: meals.length, todayCalories },
                     exercise: {
                         sessionsThisWeek: workouts.length,
                         totalMinutesThisWeek: workouts.reduce((s, w) => s + w.durationMin, 0),
@@ -95,119 +148,100 @@ server.tool("get_dashboard_summary", "Get a summary of today's and this week's a
                     },
                     habits: habitData,
                 }, null, 2),
-            },
-        ],
+            }],
     };
 });
 server.tool("log_meal", "Log a meal to the diet tracker", {
     mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
     description: z.string().describe("What was eaten"),
-    calories: z.number().optional().describe("Calorie count"),
-    protein: z.number().optional().describe("Protein in grams"),
-    carbs: z.number().optional().describe("Carbs in grams"),
-    fat: z.number().optional().describe("Fat in grams"),
+    calories: z.number().optional(),
+    protein: z.number().optional(),
+    carbs: z.number().optional(),
+    fat: z.number().optional(),
     notes: z.string().optional(),
 }, async ({ mealType, description, calories, protein, carbs, fat, notes }) => {
     const now = new Date();
-    const meal = await prisma.mealLog.create({
-        data: {
-            date: now,
-            mealType,
-            description,
-            calories: calories ?? null,
-            protein: protein ?? null,
-            carbs: carbs ?? null,
-            fat: fat ?? null,
-            notes: notes ?? null,
-            calendarEvent: {
-                create: {
-                    title: `${mealType.charAt(0).toUpperCase() + mealType.slice(1)}: ${description}`,
-                    start: now,
-                    end: now,
-                    allDay: true,
-                    area: "DIET",
-                    color: "#22c55e",
-                },
-            },
+    const mealId = uid();
+    const eventId = uid();
+    const isoNow = now.toISOString();
+    await db.batch([
+        {
+            sql: `INSERT INTO "MealLog" (id, date, mealType, description, calories, protein, carbs, fat, notes, recipeId, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+            args: [mealId, isoNow, mealType, description, calories ?? null, protein ?? null, carbs ?? null, fat ?? null, notes ?? null, isoNow, isoNow],
         },
-    });
-    return { content: [{ type: "text", text: `Logged meal: ${meal.id}` }] };
+        {
+            sql: `INSERT INTO "CalendarEvent" (id, title, start, end, allDay, area, color, description, mealLogId, workoutSessionId, learningSessionId, habitLogId, scheduleBlockId, createdAt, updatedAt) VALUES (?, ?, ?, ?, 0, 'DIET', '#22c55e', NULL, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+            args: [eventId, `${mealType.charAt(0).toUpperCase() + mealType.slice(1)}: ${description}`, isoNow, isoNow, mealId, isoNow, isoNow],
+        },
+    ]);
+    return { content: [{ type: "text", text: `Logged meal: ${mealId}` }] };
 });
 server.tool("log_workout", "Log a workout session", {
     name: z.string().describe("Workout name, e.g. 'Upper body push'"),
     type: z.enum(["strength", "cardio", "mobility", "sport"]),
-    durationMin: z.number().describe("Duration in minutes"),
+    durationMin: z.coerce.number().describe("Duration in minutes"),
     notes: z.string().optional(),
 }, async ({ name, type, durationMin, notes }) => {
     const now = new Date();
-    const workout = await prisma.workoutSession.create({
-        data: {
-            date: now,
-            name,
-            type,
-            durationMin,
-            notes: notes ?? null,
-            calendarEvent: {
-                create: {
-                    title: `${name} (${durationMin}min)`,
-                    start: now,
-                    end: new Date(now.getTime() + durationMin * 60 * 1000),
-                    allDay: false,
-                    area: "EXERCISE",
-                    color: "#3b82f6",
-                },
-            },
+    const sessionId = uid();
+    const eventId = uid();
+    const isoNow = now.toISOString();
+    const isoEnd = new Date(now.getTime() + durationMin * 60 * 1000).toISOString();
+    await db.batch([
+        {
+            sql: `INSERT INTO "WorkoutSession" (id, date, name, type, durationMin, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [sessionId, isoNow, name, type, durationMin, notes ?? null, isoNow, isoNow],
         },
-    });
-    return { content: [{ type: "text", text: `Logged workout: ${workout.id}` }] };
+        {
+            sql: `INSERT INTO "CalendarEvent" (id, title, start, end, allDay, area, color, description, mealLogId, workoutSessionId, learningSessionId, habitLogId, scheduleBlockId, createdAt, updatedAt) VALUES (?, ?, ?, ?, 0, 'EXERCISE', '#3b82f6', NULL, NULL, ?, NULL, NULL, NULL, ?, ?)`,
+            args: [eventId, `${name} (${durationMin}min)`, isoNow, isoEnd, sessionId, isoNow, isoNow],
+        },
+    ]);
+    return { content: [{ type: "text", text: `Logged workout: ${sessionId}` }] };
 });
 server.tool("log_learning_session", "Log a learning/study session", {
     category: z.enum(["CODING", "READING", "FINANCE", "OTHER"]),
     title: z.string().describe("What you studied"),
-    durationMin: z.number().describe("Duration in minutes"),
+    durationMin: z.coerce.number().describe("Duration in minutes"),
     resource: z.string().optional().describe("URL or book title"),
     notes: z.string().optional(),
 }, async ({ category, title, durationMin, resource, notes }) => {
     const now = new Date();
-    const session = await prisma.learningSession.create({
-        data: {
-            date: now,
-            category,
-            title,
-            durationMin,
-            resource: resource ?? null,
-            notes: notes ?? null,
-            calendarEvent: {
-                create: {
-                    title: `${category}: ${title}`,
-                    start: now,
-                    end: new Date(now.getTime() + durationMin * 60 * 1000),
-                    allDay: false,
-                    area: "LEARNING",
-                    color: "#a855f7",
-                },
-            },
+    const sessionId = uid();
+    const eventId = uid();
+    const isoNow = now.toISOString();
+    const isoEnd = new Date(now.getTime() + durationMin * 60 * 1000).toISOString();
+    await db.batch([
+        {
+            sql: `INSERT INTO "LearningSession" (id, date, category, title, durationMin, resource, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [sessionId, isoNow, category, title, durationMin, resource ?? null, notes ?? null, isoNow, isoNow],
         },
-    });
-    return { content: [{ type: "text", text: `Logged session: ${session.id}` }] };
+        {
+            sql: `INSERT INTO "CalendarEvent" (id, title, start, end, allDay, area, color, description, mealLogId, workoutSessionId, learningSessionId, habitLogId, scheduleBlockId, createdAt, updatedAt) VALUES (?, ?, ?, ?, 0, 'LEARNING', '#a855f7', NULL, NULL, NULL, ?, NULL, NULL, ?, ?)`,
+            args: [eventId, `${category}: ${title}`, isoNow, isoEnd, sessionId, isoNow, isoNow],
+        },
+    ]);
+    return { content: [{ type: "text", text: `Logged session: ${sessionId}` }] };
 });
 server.tool("get_habits", "Get all habits with their current streaks", {}, async () => {
-    const habits = await prisma.habit.findMany({
-        include: {
-            logs: {
-                orderBy: { date: "desc" },
-                take: 90,
-            },
-        },
+    const since = subDays(startOfDay(new Date()), 90);
+    const [habitsRes, logsRes] = await Promise.all([
+        db.execute({ sql: `SELECT * FROM "Habit"`, args: [] }),
+        db.execute({ sql: `SELECT * FROM "HabitLog" WHERE date >= ? ORDER BY date DESC`, args: [since.toISOString()] }),
+    ]);
+    const result = habitsRes.rows.map((h) => {
+        const logs = logsRes.rows
+            .filter((l) => l.habitId === h.id)
+            .map((l) => ({ date: l.date, kept: Boolean(l.kept) }));
+        return {
+            id: h.id,
+            name: h.name,
+            type: h.type,
+            streak: calculateStreak(logs),
+            totalLogs: logs.length,
+            keptCount: logs.filter((l) => l.kept).length,
+        };
     });
-    const result = habits.map((h) => ({
-        id: h.id,
-        name: h.name,
-        type: h.type,
-        streak: calculateStreak(h.logs.map((l) => ({ date: l.date, kept: l.kept }))),
-        totalLogs: h.logs.length,
-        keptCount: h.logs.filter((l) => l.kept).length,
-    }));
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
 });
 server.tool("check_habit", "Mark a habit as kept or missed for today", {
@@ -216,74 +250,147 @@ server.tool("check_habit", "Mark a habit as kept or missed for today", {
     notes: z.string().optional(),
 }, async ({ habitId, kept, notes }) => {
     const today = startOfDay(new Date());
-    const habit = await prisma.habit.findUnique({ where: { id: habitId } });
-    if (!habit)
+    const habitRes = await db.execute({ sql: `SELECT * FROM "Habit" WHERE id = ?`, args: [habitId] });
+    if (habitRes.rows.length === 0)
         return { content: [{ type: "text", text: "Habit not found" }] };
-    await prisma.habitLog.upsert({
-        where: { habitId_date: { habitId, date: today } },
-        update: { kept, notes: notes ?? null },
-        create: {
-            habitId,
-            date: today,
-            kept,
-            notes: notes ?? null,
-            calendarEvent: {
-                create: {
-                    title: `${habit.name}: ${kept ? "✓ Kept" : "✗ Missed"}`,
-                    start: today,
-                    end: today,
-                    allDay: true,
-                    area: "HABITS",
-                    color: kept ? "#f97316" : "#ef4444",
-                },
-            },
-        },
+    const habit = habitRes.rows[0];
+    const isoToday = today.toISOString();
+    const isoNow = new Date().toISOString();
+    const existingRes = await db.execute({
+        sql: `SELECT id FROM "HabitLog" WHERE habitId = ? AND date = ?`,
+        args: [habitId, isoToday],
     });
+    if (existingRes.rows.length > 0) {
+        await db.execute({
+            sql: `UPDATE "HabitLog" SET kept = ?, notes = ? WHERE habitId = ? AND date = ?`,
+            args: [kept ? 1 : 0, notes ?? null, habitId, isoToday],
+        });
+    }
+    else {
+        const logId = uid();
+        const eventId = uid();
+        await db.batch([
+            {
+                sql: `INSERT INTO "HabitLog" (id, habitId, date, kept, notes, createdAt) VALUES (?, ?, ?, ?, ?, ?)`,
+                args: [logId, habitId, isoToday, kept ? 1 : 0, notes ?? null, isoNow],
+            },
+            {
+                sql: `INSERT INTO "CalendarEvent" (id, title, start, end, allDay, area, color, description, mealLogId, workoutSessionId, learningSessionId, habitLogId, scheduleBlockId, createdAt, updatedAt) VALUES (?, ?, ?, ?, 1, 'HABITS', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?)`,
+                args: [eventId, `${habit.name}: ${kept ? "✓ Kept" : "✗ Missed"}`, isoToday, isoToday, kept ? "#f97316" : "#ef4444", logId, isoNow, isoNow],
+            },
+        ]);
+    }
     return {
         content: [{ type: "text", text: `Habit "${habit.name}" marked as ${kept ? "kept" : "missed"} for today` }],
     };
+});
+server.tool("create_habit", "Create a new habit to track (BUILD a positive habit or QUIT a bad one)", {
+    name: z.string().describe("Habit name, e.g. 'Daily meditation'"),
+    type: z.enum(["BUILD", "QUIT"]).describe("BUILD = positive habit to form, QUIT = bad habit to break"),
+    description: z.string().optional(),
+    targetDays: z.coerce.number().int().optional().describe("Goal streak length in days, e.g. 30 or 66"),
+}, async ({ name, type, description, targetDays }) => {
+    const isoNow = new Date().toISOString();
+    const habitId = uid();
+    await db.execute({
+        sql: `INSERT INTO "Habit" (id, name, type, description, startDate, targetDays, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [habitId, name, type, description ?? null, isoNow, targetDays ?? null, isoNow, isoNow],
+    });
+    return {
+        content: [{
+                type: "text",
+                text: `Created habit "${name}" (${type}, ID: ${habitId}). Use check_habit with this ID to log it each day.`,
+            }],
+    };
+});
+server.tool("update_habit", "Edit an existing habit's name, type, description, or target days", {
+    habitId: z.string().describe("The habit ID (use get_habits to find IDs)"),
+    name: z.string().optional(),
+    type: z.enum(["BUILD", "QUIT"]).optional(),
+    description: z.string().optional(),
+    targetDays: z.coerce.number().int().optional().describe("New goal streak length in days"),
+}, async ({ habitId, name, type, description, targetDays }) => {
+    const habitRes = await db.execute({ sql: `SELECT * FROM "Habit" WHERE id = ?`, args: [habitId] });
+    if (habitRes.rows.length === 0)
+        return { content: [{ type: "text", text: "Habit not found" }] };
+    const isoNow = new Date().toISOString();
+    const current = habitRes.rows[0];
+    await db.execute({
+        sql: `UPDATE "Habit" SET name = ?, type = ?, description = ?, targetDays = ?, updatedAt = ? WHERE id = ?`,
+        args: [
+            name ?? current.name,
+            type ?? current.type,
+            description !== undefined ? description : current.description,
+            targetDays !== undefined ? targetDays : current.targetDays,
+            isoNow,
+            habitId,
+        ],
+    });
+    return {
+        content: [{ type: "text", text: `Updated habit "${name ?? current.name}"` }],
+    };
+});
+server.tool("delete_habit", "Permanently delete a habit and all its logs", {
+    habitId: z.string().describe("The habit ID (use get_habits to find IDs)"),
+}, async ({ habitId }) => {
+    const habitRes = await db.execute({ sql: `SELECT name FROM "Habit" WHERE id = ?`, args: [habitId] });
+    if (habitRes.rows.length === 0)
+        return { content: [{ type: "text", text: "Habit not found" }] };
+    const name = habitRes.rows[0].name;
+    // Delete CalendarEvents linked to HabitLogs first, then logs, then habit
+    await db.batch([
+        {
+            sql: `DELETE FROM "CalendarEvent" WHERE habitLogId IN (SELECT id FROM "HabitLog" WHERE habitId = ?)`,
+            args: [habitId],
+        },
+        { sql: `DELETE FROM "HabitLog" WHERE habitId = ?`, args: [habitId] },
+        { sql: `DELETE FROM "Habit" WHERE id = ?`, args: [habitId] },
+    ]);
+    return { content: [{ type: "text", text: `Deleted habit "${name}"` }] };
 });
 server.tool("get_calendar_events", "Get calendar events for a date range", {
     from: z.string().describe("Start date in YYYY-MM-DD format"),
     to: z.string().describe("End date in YYYY-MM-DD format"),
 }, async ({ from, to }) => {
-    const events = await prisma.calendarEvent.findMany({
-        where: {
-            start: { gte: new Date(from) },
-            end: { lte: new Date(to + "T23:59:59") },
-        },
-        orderBy: { start: "asc" },
+    const res = await db.execute({
+        sql: `SELECT * FROM "CalendarEvent" WHERE start >= ? AND end <= ? ORDER BY start ASC`,
+        args: [new Date(from).toISOString(), new Date(to + "T23:59:59").toISOString()],
     });
-    return { content: [{ type: "text", text: JSON.stringify(events, null, 2) }] };
+    return { content: [{ type: "text", text: JSON.stringify(res.rows, null, 2) }] };
 });
-server.tool("get_trends", "Get weekly/monthly summary statistics", {
-    period: z.enum(["week", "month"]).default("week"),
-}, async ({ period }) => {
+server.tool("get_trends", "Get weekly/monthly summary statistics", { period: z.enum(["week", "month"]).default("week") }, async ({ period }) => {
     const days = period === "week" ? 7 : 30;
     const since = subDays(startOfDay(new Date()), days);
-    const [meals, workouts, sessions, habitLogs] = await Promise.all([
-        prisma.mealLog.findMany({ where: { date: { gte: since } } }),
-        prisma.workoutSession.findMany({ where: { date: { gte: since } } }),
-        prisma.learningSession.findMany({ where: { date: { gte: since } } }),
-        prisma.habitLog.findMany({ where: { date: { gte: since } }, include: { habit: true } }),
+    const isoSince = since.toISOString();
+    const [mealsRes, workoutsRes, sessionsRes, habitLogsRes] = await Promise.all([
+        db.execute({ sql: `SELECT * FROM "MealLog" WHERE date >= ?`, args: [isoSince] }),
+        db.execute({ sql: `SELECT * FROM "WorkoutSession" WHERE date >= ?`, args: [isoSince] }),
+        db.execute({ sql: `SELECT * FROM "LearningSession" WHERE date >= ?`, args: [isoSince] }),
+        db.execute({
+            sql: `SELECT hl.*, h.name as habitName FROM "HabitLog" hl JOIN "Habit" h ON h.id = hl.habitId WHERE hl.date >= ?`,
+            args: [isoSince],
+        }),
     ]);
-    const avgCalories = meals.filter((m) => m.calories).length > 0
-        ? Math.round(meals.reduce((s, m) => s + (m.calories ?? 0), 0) /
-            meals.filter((m) => m.calories).length)
+    const meals = mealsRes.rows;
+    const workouts = workoutsRes.rows;
+    const sessions = sessionsRes.rows;
+    const habitLogs = habitLogsRes.rows;
+    const mealsWithCalories = meals.filter((m) => m.calories !== null);
+    const avgCalories = mealsWithCalories.length > 0
+        ? Math.round(mealsWithCalories.reduce((s, m) => s + m.calories, 0) / mealsWithCalories.length)
         : null;
     const habitStats = habitLogs.reduce((acc, log) => {
-        if (!acc[log.habitId]) {
-            acc[log.habitId] = { name: log.habit.name, kept: 0, missed: 0 };
-        }
+        const id = log.habitId;
+        if (!acc[id])
+            acc[id] = { name: log.habitName, kept: 0, missed: 0 };
         if (log.kept)
-            acc[log.habitId].kept++;
+            acc[id].kept++;
         else
-            acc[log.habitId].missed++;
+            acc[id].missed++;
         return acc;
     }, {});
     return {
-        content: [
-            {
+        content: [{
                 type: "text",
                 text: JSON.stringify({
                     period,
@@ -296,7 +403,8 @@ server.tool("get_trends", "Get weekly/monthly summary statistics", {
                         totalSessions: workouts.length,
                         totalMinutes: workouts.reduce((s, w) => s + w.durationMin, 0),
                         byType: workouts.reduce((acc, w) => {
-                            acc[w.type] = (acc[w.type] ?? 0) + 1;
+                            const t = w.type;
+                            acc[t] = (acc[t] ?? 0) + 1;
                             return acc;
                         }, {}),
                     },
@@ -304,25 +412,23 @@ server.tool("get_trends", "Get weekly/monthly summary statistics", {
                         totalSessions: sessions.length,
                         totalMinutes: sessions.reduce((s, s2) => s + s2.durationMin, 0),
                         byCategory: sessions.reduce((acc, s) => {
-                            acc[s.category] = (acc[s.category] ?? 0) + s.durationMin;
+                            const c = s.category;
+                            acc[c] = (acc[c] ?? 0) + s.durationMin;
                             return acc;
                         }, {}),
                     },
                     habits: Object.values(habitStats),
                 }, null, 2),
-            },
-        ],
+            }],
     };
 });
 server.tool("get_recipes", "Get all recipes from the recipe library with ingredients and macro info", {}, async () => {
-    const recipes = await prisma.recipe.findMany({
-        include: {
-            ingredients: { orderBy: { order: "asc" } },
-            steps: { orderBy: { stepNum: "asc" } },
-        },
-        orderBy: { name: "asc" },
-    });
-    const result = recipes.map((r) => ({
+    const [recipesRes, ingredientsRes, stepsRes] = await Promise.all([
+        db.execute({ sql: `SELECT * FROM "Recipe" ORDER BY name ASC`, args: [] }),
+        db.execute({ sql: `SELECT * FROM "RecipeIngredient" ORDER BY "order" ASC`, args: [] }),
+        db.execute({ sql: `SELECT * FROM "RecipeStep" ORDER BY stepNum ASC`, args: [] }),
+    ]);
+    const result = recipesRes.rows.map((r) => ({
         id: r.id,
         name: r.name,
         description: r.description,
@@ -330,18 +436,22 @@ server.tool("get_recipes", "Get all recipes from the recipe library with ingredi
         cookTimeMins: r.cookTimeMins,
         servings: r.servings,
         macros: { calories: r.calories, protein: r.protein, carbs: r.carbs, fat: r.fat },
-        ingredients: r.ingredients.map((i) => ({ name: i.name, amount: i.amount })),
-        steps: r.steps.map((s) => ({ step: s.stepNum, text: s.text })),
+        ingredients: ingredientsRes.rows
+            .filter((i) => i.recipeId === r.id)
+            .map((i) => ({ name: i.name, amount: i.amount })),
+        steps: stepsRes.rows
+            .filter((s) => s.recipeId === r.id)
+            .map((s) => ({ step: s.stepNum, text: s.text })),
     }));
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
 });
 server.tool("get_workout_plans", "Get all workout plan templates with their exercise tables", {}, async () => {
-    const plans = await prisma.workoutPlan.findMany({
-        include: { exercises: { orderBy: { order: "asc" } } },
-        orderBy: { name: "asc" },
-    });
+    const [plansRes, exercisesRes] = await Promise.all([
+        db.execute({ sql: `SELECT * FROM "WorkoutPlan" ORDER BY name ASC`, args: [] }),
+        db.execute({ sql: `SELECT * FROM "WorkoutPlanExercise" ORDER BY "order" ASC`, args: [] }),
+    ]);
     const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const result = plans.map((p) => {
+    const result = plansRes.rows.map((p) => {
         let scheduledDays = [];
         try {
             scheduledDays = JSON.parse(p.scheduledDays);
@@ -354,7 +464,9 @@ server.tool("get_workout_plans", "Get all workout plan templates with their exer
             name: p.name,
             description: p.description,
             scheduledDays: scheduledDays.map((d) => DAY_NAMES[d]).join(", ") || "None",
-            exercises: p.exercises.map((ex) => ({
+            exercises: exercisesRes.rows
+                .filter((ex) => ex.planId === p.id)
+                .map((ex) => ({
                 name: ex.name,
                 sets: ex.sets,
                 reps: ex.reps,
@@ -366,142 +478,134 @@ server.tool("get_workout_plans", "Get all workout plan templates with their exer
     });
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
 });
-server.tool("create_workout_plan", "Create a new workout plan template with exercises and which days of the week it's scheduled", {
+server.tool("create_workout_plan", "Create a new workout plan template with exercises and scheduled days", {
     name: z.string().describe("Plan name, e.g. 'Push Day A'"),
     description: z.string().optional(),
-    scheduledDays: z.array(z.number().int().min(0).max(6)).describe("Days of week to schedule this plan (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)"),
-    exercises: z.array(z.object({
-        name: z.string().describe("Exercise name, e.g. 'Bench Press'"),
-        sets: z.number().int().optional(),
-        reps: z.number().int().optional(),
-        weightKg: z.number().optional(),
-        restSec: z.number().int().optional().describe("Rest period in seconds"),
-        notes: z.string().optional().describe("e.g. 'RPE 8', 'to failure'"),
-    })).describe("List of exercises for this plan"),
+    scheduledDays: z.union([
+        z.array(z.number().int().min(0).max(6)),
+        z.string().transform((s) => JSON.parse(s)),
+    ]).describe("Days of week as array (0=Sun … 6=Sat), e.g. [1,3,6] for Mon/Wed/Sat"),
+    exercises: z.union([
+        z.array(z.object({
+            name: z.string(),
+            sets: z.coerce.number().int().optional(),
+            reps: z.coerce.number().int().optional(),
+            weightKg: z.coerce.number().optional(),
+            restSec: z.coerce.number().int().optional(),
+            notes: z.string().optional(),
+        })),
+        z.string().transform((s) => JSON.parse(s)),
+    ]),
 }, async ({ name, description, scheduledDays, exercises }) => {
-    const plan = await prisma.workoutPlan.create({
-        data: {
-            name,
-            description: description ?? null,
-            scheduledDays: JSON.stringify(scheduledDays ?? []),
-            exercises: {
-                create: exercises.map((ex, i) => ({
-                    name: ex.name,
-                    sets: ex.sets ?? null,
-                    reps: ex.reps ?? null,
-                    weightKg: ex.weightKg ?? null,
-                    restSec: ex.restSec ?? null,
-                    notes: ex.notes ?? null,
-                    order: i,
-                })),
-            },
+    const isoNow = new Date().toISOString();
+    const planId = uid();
+    const statements = [
+        {
+            sql: `INSERT INTO "WorkoutPlan" (id, name, description, scheduledDays, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`,
+            args: [planId, name, description ?? null, JSON.stringify(scheduledDays ?? []), isoNow, isoNow],
         },
-        include: { exercises: true },
-    });
+        ...exercises.map((ex, i) => ({
+            sql: `INSERT INTO "WorkoutPlanExercise" (id, planId, name, sets, reps, weightKg, restSec, notes, "order") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [uid(), planId, ex.name, ex.sets ?? null, ex.reps ?? null, ex.weightKg ?? null, ex.restSec ?? null, ex.notes ?? null, i],
+        })),
+    ];
+    await db.batch(statements);
     const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const dayStr = scheduledDays.map((d) => DAY_NAMES[d]).join(", ");
     return {
         content: [{
                 type: "text",
-                text: `Created workout plan "${plan.name}" (${plan.id}) scheduled on: ${dayStr || "no days set"}. ${plan.exercises.length} exercises added.`,
+                text: `Created workout plan "${name}" (${planId}) scheduled on: ${dayStr || "no days set"}. ${exercises.length} exercises added.`,
             }],
     };
 });
 server.tool("create_recipe", "Add a new recipe to the recipe library with ingredients, steps, and nutritional info", {
-    name: z.string().describe("Recipe name"),
+    name: z.string(),
     description: z.string().optional(),
     prepTimeMins: z.number().int().optional(),
     cookTimeMins: z.number().int().optional(),
     servings: z.number().int().optional(),
     calories: z.number().int().optional().describe("Calories per serving"),
-    protein: z.number().int().optional().describe("Protein in grams per serving"),
-    carbs: z.number().int().optional().describe("Carbs in grams per serving"),
-    fat: z.number().int().optional().describe("Fat in grams per serving"),
+    protein: z.number().int().optional().describe("Protein in grams"),
+    carbs: z.number().int().optional().describe("Carbs in grams"),
+    fat: z.number().int().optional().describe("Fat in grams"),
     notes: z.string().optional(),
     ingredients: z.array(z.object({
         name: z.string(),
-        amount: z.string().optional().describe("e.g. '200g', '1 cup', '2 tbsp'"),
+        amount: z.string().optional().describe("e.g. '200g', '1 cup'"),
     })).optional(),
     steps: z.array(z.string()).optional().describe("Ordered cooking steps"),
 }, async ({ name, description, prepTimeMins, cookTimeMins, servings, calories, protein, carbs, fat, notes, ingredients, steps }) => {
-    const recipe = await prisma.recipe.create({
-        data: {
-            name,
-            description: description ?? null,
-            prepTimeMins: prepTimeMins ?? null,
-            cookTimeMins: cookTimeMins ?? null,
-            servings: servings ?? null,
-            calories: calories ?? null,
-            protein: protein ?? null,
-            carbs: carbs ?? null,
-            fat: fat ?? null,
-            notes: notes ?? null,
-            ingredients: {
-                create: (ingredients ?? []).map((ing, i) => ({
-                    name: ing.name,
-                    amount: ing.amount ?? null,
-                    order: i,
-                })),
-            },
-            steps: {
-                create: (steps ?? []).map((text, i) => ({
-                    stepNum: i + 1,
-                    text,
-                })),
-            },
+    const isoNow = new Date().toISOString();
+    const recipeId = uid();
+    const statements = [
+        {
+            sql: `INSERT INTO "Recipe" (id, name, description, prepTimeMins, cookTimeMins, servings, calories, protein, carbs, fat, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [recipeId, name, description ?? null, prepTimeMins ?? null, cookTimeMins ?? null, servings ?? null, calories ?? null, protein ?? null, carbs ?? null, fat ?? null, notes ?? null, isoNow, isoNow],
         },
-    });
+        ...(ingredients ?? []).map((ing, i) => ({
+            sql: `INSERT INTO "RecipeIngredient" (id, recipeId, name, amount, "order") VALUES (?, ?, ?, ?, ?)`,
+            args: [uid(), recipeId, ing.name, ing.amount ?? null, i],
+        })),
+        ...(steps ?? []).map((text, i) => ({
+            sql: `INSERT INTO "RecipeStep" (id, recipeId, stepNum, text) VALUES (?, ?, ?, ?)`,
+            args: [uid(), recipeId, i + 1, text],
+        })),
+    ];
+    await db.batch(statements);
     return {
         content: [{
                 type: "text",
-                text: `Created recipe "${recipe.name}" (${recipe.id})${calories ? ` — ${calories} kcal per serving` : ""}. It is now visible in the recipe library.`,
+                text: `Created recipe "${name}" (ID: ${recipeId})${calories ? ` — ${calories} kcal per serving` : ""}.
+
+Now ask the user: "Which days and meals would you like to add **${name}** to your meal plan? For example: Monday dinner, Wednesday lunch." Then call \`set_meal_plan_entry\` for each slot they mention, using recipeId: "${recipeId}".`,
             }],
     };
 });
 server.tool("set_meal_plan_entry", "Set or update a planned meal for a specific day and meal slot in the weekly meal plan", {
-    dayOfWeek: z.number().int().min(0).max(6).describe("0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat"),
+    dayOfWeek: z.coerce.number().int().min(0).max(6).describe("0=Sun, 1=Mon … 6=Sat"),
     mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
-    recipeId: z.string().optional().describe("Recipe ID from get_recipes — use this to link a recipe from the library"),
-    description: z.string().optional().describe("Free-text description if not using a recipe, e.g. 'Greek yoghurt with berries'"),
+    recipeId: z.string().optional().describe("Recipe ID from get_recipes"),
+    description: z.string().optional().describe("Free-text if not using a recipe"),
 }, async ({ dayOfWeek, mealType, recipeId, description }) => {
     if (!recipeId && !description) {
         return { content: [{ type: "text", text: "Error: provide either recipeId or description" }] };
     }
-    const entry = await prisma.mealPlanEntry.upsert({
-        where: { dayOfWeek_mealType: { dayOfWeek, mealType } },
-        update: { recipeId: recipeId ?? null, description: recipeId ? null : (description ?? null) },
-        create: {
-            dayOfWeek,
-            mealType,
-            recipeId: recipeId ?? null,
-            description: recipeId ? null : (description ?? null),
-        },
-        include: { recipe: { select: { name: true } } },
+    const isoNow = new Date().toISOString();
+    const entryId = uid();
+    await db.execute({
+        sql: `INSERT INTO "MealPlanEntry" (id, dayOfWeek, mealType, recipeId, description, createdAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(dayOfWeek, mealType) DO UPDATE SET
+              recipeId = excluded.recipeId,
+              description = excluded.description,
+              updatedAt = excluded.updatedAt`,
+        args: [entryId, dayOfWeek, mealType, recipeId ?? null, recipeId ? null : (description ?? null), isoNow, isoNow],
     });
+    let mealName = description;
+    if (recipeId) {
+        const res = await db.execute({ sql: `SELECT name FROM "Recipe" WHERE id = ?`, args: [recipeId] });
+        mealName = res.rows.length > 0 ? res.rows[0].name : recipeId;
+    }
     const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const meal = entry.recipe?.name ?? description;
     return {
         content: [{
                 type: "text",
-                text: `Set ${mealType} on ${DAY_NAMES[dayOfWeek]} → "${meal}". Visible in the Meal Plan grid on the dashboard.`,
+                text: `Set ${mealType} on ${DAY_NAMES[dayOfWeek]} → "${mealName}". Visible in the Meal Plan grid on the dashboard.`,
             }],
     };
 });
-server.tool("get_weekly_schedule", "Get the full weekly schedule: which workout plans are on which days, and what meals are planned each day", {}, async () => {
-    const [plans, mealPlanEntries] = await Promise.all([
-        prisma.workoutPlan.findMany({
-            include: { exercises: { orderBy: { order: "asc" } } },
-            orderBy: { name: "asc" },
-        }),
-        prisma.mealPlanEntry.findMany({
-            include: { recipe: { select: { name: true, calories: true, protein: true, carbs: true, fat: true } } },
-            orderBy: { dayOfWeek: "asc" },
-        }),
+server.tool("get_weekly_schedule", "Get the full weekly schedule: which workout plans are on which days, and what meals are planned", {}, async () => {
+    const [plansRes, exercisesRes, mealPlanRes, recipesRes] = await Promise.all([
+        db.execute({ sql: `SELECT * FROM "WorkoutPlan" ORDER BY name ASC`, args: [] }),
+        db.execute({ sql: `SELECT * FROM "WorkoutPlanExercise" ORDER BY "order" ASC`, args: [] }),
+        db.execute({ sql: `SELECT * FROM "MealPlanEntry" ORDER BY dayOfWeek ASC`, args: [] }),
+        db.execute({ sql: `SELECT id, name, calories, protein, carbs, fat FROM "Recipe"`, args: [] }),
     ]);
     const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Mon–Sun display
+    const DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Mon–Sun
     const schedule = DISPLAY_ORDER.map((dow) => {
-        const workouts = plans
+        const workouts = plansRes.rows
             .filter((p) => {
             try {
                 return JSON.parse(p.scheduledDays).includes(dow);
@@ -512,25 +616,28 @@ server.tool("get_weekly_schedule", "Get the full weekly schedule: which workout 
         })
             .map((p) => ({
             plan: p.name,
-            exercises: p.exercises.map((ex) => ({
+            exercises: exercisesRes.rows.filter((ex) => ex.planId === p.id).map((ex) => ({
                 name: ex.name,
                 sets: ex.sets,
                 reps: ex.reps,
                 weightKg: ex.weightKg ? `${ex.weightKg}kg` : null,
             })),
         }));
-        const meals = mealPlanEntries
+        const meals = mealPlanRes.rows
             .filter((e) => e.dayOfWeek === dow)
-            .map((e) => ({
-            mealType: e.mealType,
-            meal: e.recipe?.name ?? e.description,
-            calories: e.recipe?.calories ?? null,
-        }));
+            .map((e) => {
+            const recipe = e.recipeId ? recipesRes.rows.find((r) => r.id === e.recipeId) : null;
+            return {
+                mealType: e.mealType,
+                meal: recipe?.name ?? e.description,
+                calories: recipe?.calories ?? null,
+            };
+        });
         return { day: DAY_NAMES[dow], workouts, meals };
     });
     return { content: [{ type: "text", text: JSON.stringify(schedule, null, 2) }] };
 });
-server.tool("create_schedule_block", "Add a time block to the calendar (gym session, work, sleep, learning time, commute, etc.)", {
+server.tool("create_schedule_block", "Add a time block to the calendar (gym, work, sleep, learning, commute, etc.)", {
     title: z.string().describe("Block title, e.g. 'Morning gym', 'Deep work', 'Sleep'"),
     category: z.enum(["GYM", "LEARNING", "SLEEP", "WORK", "COMMUTE", "PERSONAL"]),
     start: z.string().describe("ISO 8601 datetime, e.g. 2026-02-23T07:00:00"),
@@ -539,59 +646,402 @@ server.tool("create_schedule_block", "Add a time block to the calendar (gym sess
     notes: z.string().optional(),
 }, async ({ title, category, start, end, allDay, notes }) => {
     const CATEGORY_COLORS = {
-        GYM: "#3b82f6",
-        LEARNING: "#a855f7",
-        SLEEP: "#64748b",
-        WORK: "#0ea5e9",
-        COMMUTE: "#f59e0b",
-        PERSONAL: "#ec4899",
+        GYM: "#3b82f6", LEARNING: "#a855f7", SLEEP: "#64748b",
+        WORK: "#0ea5e9", COMMUTE: "#f59e0b", PERSONAL: "#ec4899",
     };
     const color = CATEGORY_COLORS[category] ?? "#6366f1";
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-    const block = await prisma.scheduleBlock.create({
-        data: {
-            title,
-            start: startDate,
-            end: endDate,
-            allDay,
-            category,
-            color,
-            notes: notes ?? null,
-            calendarEvent: {
-                create: {
-                    title,
-                    start: startDate,
-                    end: endDate,
-                    allDay,
-                    area: "SCHEDULE",
-                    color,
-                    description: notes ?? null,
-                },
-            },
+    const isoStart = new Date(start).toISOString();
+    const isoEnd = new Date(end).toISOString();
+    const isoNow = new Date().toISOString();
+    const blockId = uid();
+    const eventId = uid();
+    await db.batch([
+        {
+            sql: `INSERT INTO "ScheduleBlock" (id, title, start, end, allDay, category, color, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [blockId, title, isoStart, isoEnd, allDay ? 1 : 0, category, color, notes ?? null, isoNow, isoNow],
         },
-    });
-    return { content: [{ type: "text", text: `Created schedule block: ${block.id} — ${title} (${category})` }] };
+        {
+            sql: `INSERT INTO "CalendarEvent" (id, title, start, end, allDay, area, color, description, mealLogId, workoutSessionId, learningSessionId, habitLogId, scheduleBlockId, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, 'SCHEDULE', ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)`,
+            args: [eventId, title, isoStart, isoEnd, allDay ? 1 : 0, color, notes ?? null, blockId, isoNow, isoNow],
+        },
+    ]);
+    return { content: [{ type: "text", text: `Created schedule block: ${blockId} — ${title} (${category})` }] };
 });
-server.tool("get_upcoming_schedule", "Get scheduled time blocks for the next N days", {
-    days: z.number().default(7).describe("Number of days ahead to look (default 7)"),
-}, async ({ days }) => {
+server.tool("get_upcoming_schedule", "Get scheduled time blocks for the next N days", { days: z.coerce.number().default(7).describe("Number of days ahead to look (default 7)") }, async ({ days }) => {
     const now = startOfDay(new Date());
     const until = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
-    const blocks = await prisma.scheduleBlock.findMany({
-        where: { start: { gte: now, lte: until } },
-        orderBy: { start: "asc" },
+    const res = await db.execute({
+        sql: `SELECT * FROM "ScheduleBlock" WHERE start >= ? AND start <= ? ORDER BY start ASC`,
+        args: [now.toISOString(), until.toISOString()],
     });
-    const result = blocks.map((b) => ({
+    const result = res.rows.map((b) => ({
         id: b.id,
         title: b.title,
         category: b.category,
-        start: format(b.start, "yyyy-MM-dd HH:mm"),
-        end: format(b.end, "yyyy-MM-dd HH:mm"),
-        allDay: b.allDay,
+        start: format(new Date(b.start), "yyyy-MM-dd HH:mm"),
+        end: format(new Date(b.end), "yyyy-MM-dd HH:mm"),
+        allDay: Boolean(b.allDay),
         notes: b.notes,
     }));
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+});
+server.tool("get_recurring_blocks", "Get all recurring schedule blocks (e.g. Work 9-5, Commute)", {}, async () => {
+    const res = await db.execute(`SELECT * FROM "RecurringBlock" ORDER BY createdAt ASC`);
+    const result = res.rows.map((b) => ({
+        id: b.id,
+        title: b.title,
+        category: b.category,
+        startTime: b.startTime,
+        endTime: b.endTime,
+        daysOfWeek: JSON.parse(b.daysOfWeek),
+        endsOn: b.endsOn,
+        notes: b.notes,
+    }));
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+});
+server.tool("create_recurring_block", "Create a recurring weekly event (e.g. Work Mon-Fri 9am-5pm, Commute 8-9am)", {
+    title: z.string().describe("Event title e.g. 'Work', 'Commute to office'"),
+    category: z.enum(["GYM", "LEARNING", "SLEEP", "WORK", "COMMUTE", "PERSONAL"]),
+    startTime: z.string().describe("Start time in HH:MM format e.g. '09:00'"),
+    endTime: z.string().describe("End time in HH:MM format e.g. '17:00'"),
+    daysOfWeek: z.array(z.number().int().min(0).max(6)).describe("Days of week: 0=Sun, 1=Mon, ..., 6=Sat"),
+    endsOn: z.string().optional().describe("Optional end date ISO string"),
+    notes: z.string().optional(),
+}, async ({ title, category, startTime, endTime, daysOfWeek, endsOn, notes }) => {
+    const CATEGORY_COLORS = {
+        GYM: "#3b82f6", LEARNING: "#a855f7", SLEEP: "#64748b",
+        WORK: "#0ea5e9", COMMUTE: "#f59e0b", PERSONAL: "#ec4899",
+    };
+    const isoNow = new Date().toISOString();
+    const id = uid();
+    await db.execute({
+        sql: `INSERT INTO "RecurringBlock" (id, title, category, color, startTime, endTime, daysOfWeek, endsOn, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [id, title, category, CATEGORY_COLORS[category] ?? "#6366f1", startTime, endTime, JSON.stringify(daysOfWeek), endsOn ?? null, notes ?? null, isoNow, isoNow],
+    });
+    const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dayStr = daysOfWeek.map((d) => DAY_NAMES[d]).join(", ");
+    return { content: [{ type: "text", text: `Created recurring block "${title}" (${startTime}–${endTime}) on ${dayStr}.` }] };
+});
+server.tool("toggle_wfh_day", "Mark or unmark a date as a work-from-home day. WFH work events show a 🏠 icon in the calendar.", {
+    date: z.string().describe("Date in YYYY-MM-DD format"),
+    wfh: z.boolean().describe("true = mark as WFH, false = remove WFH marker (office day)"),
+}, async ({ date, wfh }) => {
+    const isoDate = new Date(date + "T00:00:00.000Z").toISOString();
+    if (wfh) {
+        const existing = await db.execute({ sql: `SELECT id FROM "WorkFromHomeDay" WHERE date = ?`, args: [isoDate] });
+        if (existing.rows.length === 0) {
+            await db.execute({ sql: `INSERT INTO "WorkFromHomeDay" (id, date) VALUES (?, ?)`, args: [uid(), isoDate] });
+        }
+        return { content: [{ type: "text", text: `${date} marked as WFH day.` }] };
+    }
+    else {
+        await db.execute({ sql: `DELETE FROM "WorkFromHomeDay" WHERE date = ?`, args: [isoDate] });
+        return { content: [{ type: "text", text: `${date} WFH marker removed (office day).` }] };
+    }
+});
+// ─── CAREER / JOB APPLICATIONS ───────────────────────────────────────────────
+server.tool("get_applications", "Get all job applications. Optionally filter to active only (excludes REJECTED and GHOSTED).", {
+    activeOnly: z.boolean().optional().describe("If true, only return active applications (not rejected/ghosted). Defaults to false."),
+}, async ({ activeOnly }) => {
+    const sql = activeOnly
+        ? `SELECT * FROM "JobApplication" WHERE stage NOT IN ('REJECTED','GHOSTED') ORDER BY updatedAt DESC`
+        : `SELECT * FROM "JobApplication" ORDER BY updatedAt DESC`;
+    const result = await db.execute(sql);
+    const apps = result.rows.map((r) => ({
+        id: r.id, firm: r.firm, role: r.role, stage: r.stage,
+        appliedDate: r.appliedDate, lastAction: r.lastAction, nextAction: r.nextAction,
+        prepNeeded: r.prepNeeded === 1, prepNotes: r.prepNotes, notes: r.notes,
+    }));
+    const summary = apps.map((a) => `${a.firm}${a.role ? ` (${a.role})` : ""} — ${a.stage}${a.nextAction ? ` | Next: ${a.nextAction}` : ""}${a.prepNeeded ? " ⚠️ PREP NEEDED" : ""}`).join("\n");
+    return { content: [{ type: "text", text: apps.length === 0 ? "No applications found." : `${apps.length} application(s):\n\n${summary}` }] };
+});
+server.tool("add_application", "Add a new job application to the career pipeline.", {
+    firm: z.string().describe("Company name e.g. 'B2C2'"),
+    role: z.string().optional().describe("Role title e.g. 'Quant Developer'"),
+    stage: z.enum(["APPLIED", "SCREEN", "TECHNICAL", "FINAL", "OFFER", "REJECTED", "GHOSTED"]).optional().describe("Current stage, defaults to APPLIED"),
+    appliedDate: z.string().optional().describe("Date applied in YYYY-MM-DD format"),
+    lastAction: z.string().optional().describe("Description of last action taken"),
+    nextAction: z.string().optional().describe("Description of next action needed"),
+    prepNeeded: z.boolean().optional().describe("Whether prep is needed for next stage"),
+    prepNotes: z.string().optional().describe("What specifically to prepare"),
+    notes: z.string().optional().describe("General notes about this application"),
+}, async ({ firm, role, stage, appliedDate, lastAction, nextAction, prepNeeded, prepNotes, notes }) => {
+    const isoNow = new Date().toISOString();
+    const id = uid();
+    const isoApplied = appliedDate ? new Date(appliedDate + "T00:00:00.000Z").toISOString() : null;
+    await db.execute({
+        sql: `INSERT INTO "JobApplication" (id, firm, role, stage, appliedDate, lastAction, nextAction, prepNeeded, prepNotes, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [id, firm, role ?? null, stage ?? "APPLIED", isoApplied, lastAction ?? null, nextAction ?? null, prepNeeded ? 1 : 0, prepNotes ?? null, notes ?? null, isoNow, isoNow],
+    });
+    await regenerateTrackerMd();
+    return { content: [{ type: "text", text: `Added ${firm}${role ? ` — ${role}` : ""} at stage ${stage ?? "APPLIED"}. tracker.md updated.` }] };
+});
+server.tool("update_application", "Update an existing job application — change stage, log an action, set next steps, flag prep needed.", {
+    firm: z.string().describe("Firm name to identify the application (partial match, case-insensitive)"),
+    stage: z.enum(["APPLIED", "SCREEN", "TECHNICAL", "FINAL", "OFFER", "REJECTED", "GHOSTED"]).optional(),
+    lastAction: z.string().optional().describe("What just happened e.g. 'HackerRank completed 2026-04-21'"),
+    nextAction: z.string().optional().describe("What needs to happen next"),
+    prepNeeded: z.boolean().optional(),
+    prepNotes: z.string().optional(),
+    notes: z.string().optional(),
+}, async ({ firm, stage, lastAction, nextAction, prepNeeded, prepNotes, notes }) => {
+    const existing = await db.execute({
+        sql: `SELECT id, firm, role FROM "JobApplication" WHERE firm LIKE ? ORDER BY updatedAt DESC LIMIT 1`,
+        args: [`%${firm}%`],
+    });
+    if (existing.rows.length === 0) {
+        return { content: [{ type: "text", text: `No application found matching "${firm}". Use add_application to create it.` }] };
+    }
+    const app = existing.rows[0];
+    const isoNow = new Date().toISOString();
+    const updates = ["updatedAt = ?"];
+    const args = [isoNow];
+    if (stage !== undefined) {
+        updates.push("stage = ?");
+        args.push(stage);
+    }
+    if (lastAction !== undefined) {
+        updates.push("lastAction = ?");
+        args.push(lastAction);
+    }
+    if (nextAction !== undefined) {
+        updates.push("nextAction = ?");
+        args.push(nextAction);
+    }
+    if (prepNeeded !== undefined) {
+        updates.push("prepNeeded = ?");
+        args.push(prepNeeded ? 1 : 0);
+    }
+    if (prepNotes !== undefined) {
+        updates.push("prepNotes = ?");
+        args.push(prepNotes ?? null);
+    }
+    if (notes !== undefined) {
+        updates.push("notes = ?");
+        args.push(notes ?? null);
+    }
+    args.push(app.id);
+    await db.execute({ sql: `UPDATE "JobApplication" SET ${updates.join(", ")} WHERE id = ?`, args });
+    await regenerateTrackerMd();
+    return { content: [{ type: "text", text: `Updated ${app.firm}${app.role ? ` (${app.role})` : ""}${stage ? ` → ${stage}` : ""}. tracker.md updated.` }] };
+});
+// ─── LEETCODE ─────────────────────────────────────────────────────────────────
+const PROGRESS_MD_PATH = path.join(process.env.HOME ?? "~", "leetcode", "PROGRESS.md");
+const PRESERVE_MARKER = "<!-- DB_GENERATED_BELOW -->";
+async function regenerateProgressMd() {
+    try {
+        const result = await db.execute(`SELECT * FROM "LeetCodeProblem" ORDER BY date ASC`);
+        const problems = result.rows;
+        const total = problems.length;
+        const patterns = [...new Set(problems.map((p) => p.pattern).filter(Boolean))];
+        const confProblems = problems.filter((p) => p.confidence);
+        const avgConf = confProblems.length > 0
+            ? (confProblems.reduce((s, p) => s + p.confidence, 0) / confProblems.length).toFixed(1)
+            : "—";
+        const lastDate = problems.length > 0 ? problems[problems.length - 1].date.slice(0, 10) : "—";
+        const today = format(new Date(), "yyyy-MM-dd");
+        let header = "";
+        if (fs.existsSync(PROGRESS_MD_PATH)) {
+            const existing = fs.readFileSync(PROGRESS_MD_PATH, "utf-8");
+            const markerIdx = existing.indexOf(PRESERVE_MARKER);
+            header = markerIdx !== -1 ? existing.slice(0, markerIdx).trimEnd() : existing.trimEnd();
+        }
+        const lines = ["", PRESERVE_MARKER, "",
+            `# Problems Log — Last updated: ${today}`, "",
+            "## Summary",
+            `- **Total problems logged:** ${total}`,
+            `- **Patterns covered:** ${patterns.length > 0 ? patterns.join(", ") : "none yet"}`,
+            `- **Average confidence:** ${avgConf}/10`,
+            `- **Last session:** ${lastDate}`,
+            "", "---", "",
+        ];
+        const byDate = new Map();
+        for (const p of problems) {
+            const key = p.date.slice(0, 10);
+            if (!byDate.has(key))
+                byDate.set(key, []);
+            byDate.get(key).push(p);
+        }
+        for (const [date, dayProblems] of byDate) {
+            lines.push(`### ${date}`);
+            for (const p of dayProblems) {
+                const num = p.number ? ` (#${p.number})` : "";
+                const diff = p.difficulty ? ` [${p.difficulty}]` : "";
+                const pat = p.pattern ? ` — ${p.pattern}` : "";
+                const conf = p.confidence ? ` — Confidence: ${p.confidence}/10` : "";
+                const emoji = p.approach === "Recalled" ? "🟢" : p.approach === "Reasoned" ? "🟡" : p.approach === "Needed hints" ? "🔴" : "";
+                lines.push(`- [x] **${p.name}**${num}${diff}${pat}${conf}`);
+                const meta = [p.approach ? `${emoji} ${p.approach}` : null, p.timeMins ? `Time: ${p.timeMins} min` : null].filter(Boolean).join(" | ");
+                if (meta)
+                    lines.push(`  - ${meta}`);
+                if (p.notes)
+                    lines.push(`  - Notes: ${p.notes}`);
+            }
+            lines.push("");
+        }
+        if (problems.length === 0) {
+            lines.push("_No problems logged yet._", "");
+        }
+        fs.writeFileSync(PROGRESS_MD_PATH, (header ? header + "\n" : "") + lines.join("\n"), "utf-8");
+    }
+    catch (e) {
+        console.error("Failed to regenerate PROGRESS.md:", e);
+    }
+}
+server.tool("get_leetcode_problems", "Get logged LeetCode problems. Optionally filter by recency in days (default 30).", { days: z.number().int().optional().describe("Look back N days. Omit for all problems.") }, async ({ days }) => {
+    const sql = days
+        ? `SELECT * FROM "LeetCodeProblem" WHERE date >= ? ORDER BY date DESC`
+        : `SELECT * FROM "LeetCodeProblem" ORDER BY date DESC`;
+    const args = days ? [subDays(new Date(), days).toISOString()] : [];
+    const result = await db.execute({ sql, args });
+    const problems = result.rows;
+    if (problems.length === 0)
+        return { content: [{ type: "text", text: "No problems logged yet." }] };
+    const lines = problems.map((p) => `${p.date.slice(0, 10)}: ${p.name}${p.number ? ` #${p.number}` : ""}${p.pattern ? ` [${p.pattern}]` : ""}${p.confidence ? ` conf ${p.confidence}/10` : ""}${p.approach ? ` — ${p.approach}` : ""}`);
+    return { content: [{ type: "text", text: `${problems.length} problem(s):\n\n${lines.join("\n")}` }] };
+});
+server.tool("log_leetcode_problem", "Log a completed LeetCode problem with pattern, confidence, and approach.", {
+    name: z.string().describe("Problem name e.g. 'Two Sum'"),
+    number: z.number().int().optional().describe("LeetCode problem number e.g. 1"),
+    pattern: z.enum(["Two Pointers", "Sliding Window", "Hashmap", "Binary Search", "Trees BFS", "Trees DFS", "Stack", "Queue", "Linked List", "Dynamic Programming", "Greedy", "Other"]).optional(),
+    difficulty: z.enum(["Easy", "Medium", "Hard"]).optional(),
+    timeMins: z.number().int().optional().describe("How long it took in minutes"),
+    approach: z.enum(["Recalled", "Reasoned", "Needed hints"]).optional(),
+    confidence: z.number().int().min(1).max(10).optional().describe("Honest confidence score 1-10"),
+    notes: z.string().optional().describe("What tripped you up, what clicked"),
+    date: z.string().optional().describe("Date in YYYY-MM-DD, defaults to today"),
+}, async ({ name, number, pattern, difficulty, timeMins, approach, confidence, notes, date }) => {
+    const isoNow = new Date().toISOString();
+    const isoDate = date ? new Date(date + "T12:00:00.000Z").toISOString() : isoNow;
+    const id = uid();
+    await db.execute({
+        sql: `INSERT INTO "LeetCodeProblem" (id, date, name, number, pattern, difficulty, timeMins, approach, confidence, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [id, isoDate, name, number ?? null, pattern ?? null, difficulty ?? null, timeMins ?? null, approach ?? null, confidence ?? null, notes ?? null, isoNow, isoNow],
+    });
+    await regenerateProgressMd();
+    const confStr = confidence ? ` Confidence: ${confidence}/10.` : "";
+    const approachStr = approach ? ` Approach: ${approach}.` : "";
+    return { content: [{ type: "text", text: `Logged "${name}"${number ? ` #${number}` : ""}${pattern ? ` [${pattern}]` : ""}.${approachStr}${confStr} PROGRESS.md updated.` }] };
+});
+// ─── MACRO LEARNING ───────────────────────────────────────────────────────────
+const MACRO_PROGRESS_PATH = path.join(process.env.HOME ?? "~", "macro learning", "progress.md");
+const MACRO_TRACK_NAMES = {
+    1: "Options Pricing Theory & Practice",
+    2: "Futures Contracts",
+    3: "Volatility Modelling",
+    4: "Index-Based Quant Strategies",
+    5: "Behavioural / Narrative",
+};
+const MACRO_LEVEL_EMOJI = { recall: "🔵", application: "🟢", shaky: "🟠" };
+async function regenerateMacroProgress() {
+    try {
+        const result = await db.execute(`SELECT * FROM "MacroTopic" ORDER BY track ASC, coveredAt ASC`);
+        const topics = result.rows;
+        const today = format(new Date(), "yyyy-MM-dd");
+        const appCount = topics.filter((t) => t.level === "application").length;
+        const shakyCount = topics.filter((t) => t.level === "shaky").length;
+        const lines = [
+            `# Macro Learning Progress — Last updated: ${today}`, "",
+            "**Level key:** 🔵 Recall — 🟢 Application — 🟠 Shaky (needs revisiting)", "", "---", "",
+        ];
+        const byTrack = new Map();
+        for (const t of topics) {
+            const tr = t.track ?? 0;
+            if (!byTrack.has(tr))
+                byTrack.set(tr, []);
+            byTrack.get(tr).push(t);
+        }
+        for (const trackNum of [1, 2, 3, 4, 5]) {
+            const trackTopics = byTrack.get(trackNum) ?? [];
+            lines.push(`## Track ${trackNum} — ${MACRO_TRACK_NAMES[trackNum]}`, "");
+            if (trackTopics.length === 0) {
+                lines.push("- *Not started*");
+            }
+            else {
+                for (const t of trackTopics) {
+                    const emoji = MACRO_LEVEL_EMOJI[t.level] ?? "🔵";
+                    const noteStr = t.notes ? ` — ${t.notes}` : "";
+                    lines.push(`- ${emoji} **${t.topic}** (${t.coveredAt.slice(0, 10)})${noteStr}`);
+                }
+            }
+            lines.push("");
+        }
+        lines.push("---", "", `**${topics.length} topics covered** — ${appCount} at application level, ${shakyCount} flagged shaky`, "");
+        fs.writeFileSync(MACRO_PROGRESS_PATH, lines.join("\n"), "utf-8");
+    }
+    catch (e) {
+        console.error("Failed to regenerate macro progress.md:", e);
+    }
+}
+server.tool("get_macro_topics", "Get all logged macro learning topics, optionally filtered by level or track.", {
+    level: z.enum(["recall", "application", "shaky"]).optional().describe("Filter by level"),
+    track: z.number().int().min(1).max(5).optional().describe("Filter by track (1=Options, 2=Futures, 3=Vol, 4=Index, 5=Narrative)"),
+}, async ({ level, track }) => {
+    let sql = `SELECT * FROM "MacroTopic" WHERE 1=1`;
+    const args = [];
+    if (level) {
+        sql += ` AND level = ?`;
+        args.push(level);
+    }
+    if (track) {
+        sql += ` AND track = ?`;
+        args.push(track);
+    }
+    sql += ` ORDER BY track ASC, coveredAt ASC`;
+    const result = await db.execute({ sql, args });
+    const topics = result.rows;
+    if (topics.length === 0)
+        return { content: [{ type: "text", text: "No topics logged yet." }] };
+    const lines = topics.map((t) => `[Track ${t.track ?? "?"}] ${MACRO_LEVEL_EMOJI[t.level] ?? "🔵"} ${t.topic} (${t.coveredAt.slice(0, 10)})${t.notes ? ` — ${t.notes}` : ""}`);
+    const shaky = topics.filter((t) => t.level === "shaky");
+    let summary = `${topics.length} topic(s):\n\n${lines.join("\n")}`;
+    if (shaky.length > 0)
+        summary += `\n\n⚠️ Shaky — needs revisiting: ${shaky.map((t) => t.topic).join(", ")}`;
+    return { content: [{ type: "text", text: summary }] };
+});
+server.tool("log_macro_topic", "Log a covered macro finance topic with level and notes. Updates progress.md automatically.", {
+    topic: z.string().describe("Topic name e.g. 'Black-Scholes assumptions & formula'"),
+    track: z.number().int().min(1).max(5).optional().describe("Curriculum track: 1=Options, 2=Futures, 3=Vol Modelling, 4=Index Strategies, 5=Narrative"),
+    level: z.enum(["recall", "application", "shaky"]).optional().describe("Depth reached — recall (knows it), application (can use it), shaky (covered but not retained). Defaults to recall."),
+    notes: z.string().optional().describe("One-line summary of what was covered"),
+    coveredAt: z.string().optional().describe("Date in YYYY-MM-DD, defaults to today"),
+}, async ({ topic, track, level, notes, coveredAt }) => {
+    const isoNow = new Date().toISOString();
+    const isoDate = coveredAt ? new Date(coveredAt + "T12:00:00.000Z").toISOString() : isoNow;
+    const id = uid();
+    await db.execute({
+        sql: `INSERT INTO "MacroTopic" (id, topic, track, level, coveredAt, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [id, topic, track ?? null, level ?? "recall", isoDate, notes ?? null, isoNow, isoNow],
+    });
+    await regenerateMacroProgress();
+    const trackStr = track ? ` [Track ${track} — ${MACRO_TRACK_NAMES[track]}]` : "";
+    const levelStr = level ?? "recall";
+    return { content: [{ type: "text", text: `Logged "${topic}"${trackStr} at ${MACRO_LEVEL_EMOJI[levelStr]} ${levelStr} level. progress.md updated.` }] };
+});
+server.tool("update_macro_topic", "Update the level of an existing macro topic (e.g. promote from recall to application, or flag as shaky).", {
+    topic: z.string().describe("Topic name to find (partial match, case-insensitive)"),
+    level: z.enum(["recall", "application", "shaky"]).describe("New level"),
+    notes: z.string().optional().describe("Updated notes"),
+}, async ({ topic, level, notes }) => {
+    const existing = await db.execute({
+        sql: `SELECT id, topic FROM "MacroTopic" WHERE topic LIKE ? ORDER BY coveredAt DESC LIMIT 1`,
+        args: [`%${topic}%`],
+    });
+    if (existing.rows.length === 0) {
+        return { content: [{ type: "text", text: `No topic found matching "${topic}". Use log_macro_topic to create it.` }] };
+    }
+    const row = existing.rows[0];
+    const isoNow = new Date().toISOString();
+    const updates = ["level = ?", "updatedAt = ?"];
+    const args = [level, isoNow];
+    if (notes !== undefined) {
+        updates.push("notes = ?");
+        args.push(notes ?? null);
+    }
+    args.push(row.id);
+    await db.execute({ sql: `UPDATE "MacroTopic" SET ${updates.join(", ")} WHERE id = ?`, args });
+    await regenerateMacroProgress();
+    return { content: [{ type: "text", text: `Updated "${row.topic}" → ${MACRO_LEVEL_EMOJI[level]} ${level}. progress.md updated.` }] };
 });
 // ─── START SERVER ─────────────────────────────────────────────────────────────
 async function main() {

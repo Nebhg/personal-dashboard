@@ -2,7 +2,7 @@ import "dotenv/config";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { createClient } from "@libsql/client";
+import { createClient, type InValue } from "@libsql/client";
 import { startOfDay, subDays, format } from "date-fns";
 import { randomUUID } from "crypto";
 import * as fs from "fs";
@@ -989,14 +989,14 @@ server.tool(
     const app = existing.rows[0];
     const isoNow = new Date().toISOString();
     const updates: string[] = ["updatedAt = ?"];
-    const args: unknown[] = [isoNow];
+    const args: InValue[] = [isoNow];
     if (stage      !== undefined) { updates.push("stage = ?");      args.push(stage); }
     if (lastAction !== undefined) { updates.push("lastAction = ?"); args.push(lastAction); }
     if (nextAction !== undefined) { updates.push("nextAction = ?"); args.push(nextAction); }
     if (prepNeeded !== undefined) { updates.push("prepNeeded = ?"); args.push(prepNeeded ? 1 : 0); }
-    if (prepNotes  !== undefined) { updates.push("prepNotes = ?");  args.push(prepNotes); }
-    if (notes      !== undefined) { updates.push("notes = ?");      args.push(notes); }
-    args.push(app.id);
+    if (prepNotes  !== undefined) { updates.push("prepNotes = ?");  args.push(prepNotes ?? null); }
+    if (notes      !== undefined) { updates.push("notes = ?");      args.push(notes ?? null); }
+    args.push(app.id as string);
     await db.execute({ sql: `UPDATE "JobApplication" SET ${updates.join(", ")} WHERE id = ?`, args });
     await regenerateTrackerMd();
     return { content: [{ type: "text" as const, text: `Updated ${app.firm}${app.role ? ` (${app.role})` : ""}${stage ? ` → ${stage}` : ""}. tracker.md updated.` }] };
@@ -1181,7 +1181,7 @@ server.tool(
   },
   async ({ level, track }) => {
     let sql = `SELECT * FROM "MacroTopic" WHERE 1=1`;
-    const args: unknown[] = [];
+    const args: InValue[] = [];
     if (level) { sql += ` AND level = ?`; args.push(level); }
     if (track) { sql += ` AND track = ?`; args.push(track); }
     sql += ` ORDER BY track ASC, coveredAt ASC`;
@@ -1242,9 +1242,9 @@ server.tool(
     const row = existing.rows[0];
     const isoNow = new Date().toISOString();
     const updates = ["level = ?", "updatedAt = ?"];
-    const args: unknown[] = [level, isoNow];
-    if (notes !== undefined) { updates.push("notes = ?"); args.push(notes); }
-    args.push(row.id);
+    const args: InValue[] = [level, isoNow];
+    if (notes !== undefined) { updates.push("notes = ?"); args.push(notes ?? null); }
+    args.push(row.id as string);
     await db.execute({ sql: `UPDATE "MacroTopic" SET ${updates.join(", ")} WHERE id = ?`, args });
     await regenerateMacroProgress();
     return { content: [{ type: "text" as const, text: `Updated "${row.topic}" → ${MACRO_LEVEL_EMOJI[level]} ${level}. progress.md updated.` }] };
