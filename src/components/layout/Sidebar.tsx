@@ -12,6 +12,8 @@ import {
   Target,
   MessageSquare,
   Briefcase,
+  Code2,
+  TrendingUp,
   Sun,
   Moon,
 } from "lucide-react";
@@ -20,6 +22,8 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/career",    label: "Career",    icon: Briefcase },
+  { href: "/leetcode",  label: "LeetCode",  icon: Code2 },
+  { href: "/macro",     label: "Macro",     icon: TrendingUp },
   { href: "/calendar",  label: "Calendar",  icon: Calendar },
   { href: "/diet",      label: "Diet",      icon: Utensils },
   { href: "/exercise",  label: "Exercise",  icon: Dumbbell },

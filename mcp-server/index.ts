@@ -1003,6 +1003,254 @@ server.tool(
   }
 );
 
+// ─── LEETCODE ─────────────────────────────────────────────────────────────────
+
+const PROGRESS_MD_PATH = path.join(process.env.HOME ?? "~", "leetcode", "PROGRESS.md");
+const PRESERVE_MARKER = "<!-- DB_GENERATED_BELOW -->";
+
+async function regenerateProgressMd(): Promise<void> {
+  try {
+    const result = await db.execute(`SELECT * FROM "LeetCodeProblem" ORDER BY date ASC`);
+    const problems = result.rows;
+    const total = problems.length;
+    const patterns = [...new Set(problems.map((p) => p.pattern).filter(Boolean))];
+    const confProblems = problems.filter((p) => p.confidence);
+    const avgConf = confProblems.length > 0
+      ? (confProblems.reduce((s, p) => s + (p.confidence as number), 0) / confProblems.length).toFixed(1)
+      : "—";
+    const lastDate = problems.length > 0 ? (problems[problems.length - 1].date as string).slice(0, 10) : "—";
+    const today = format(new Date(), "yyyy-MM-dd");
+
+    let header = "";
+    if (fs.existsSync(PROGRESS_MD_PATH)) {
+      const existing = fs.readFileSync(PROGRESS_MD_PATH, "utf-8");
+      const markerIdx = existing.indexOf(PRESERVE_MARKER);
+      header = markerIdx !== -1 ? existing.slice(0, markerIdx).trimEnd() : existing.trimEnd();
+    }
+
+    const lines: string[] = ["", PRESERVE_MARKER, "",
+      `# Problems Log — Last updated: ${today}`, "",
+      "## Summary",
+      `- **Total problems logged:** ${total}`,
+      `- **Patterns covered:** ${patterns.length > 0 ? patterns.join(", ") : "none yet"}`,
+      `- **Average confidence:** ${avgConf}/10`,
+      `- **Last session:** ${lastDate}`,
+      "", "---", "",
+    ];
+
+    const byDate = new Map<string, typeof problems>();
+    for (const p of problems) {
+      const key = (p.date as string).slice(0, 10);
+      if (!byDate.has(key)) byDate.set(key, []);
+      byDate.get(key)!.push(p);
+    }
+
+    for (const [date, dayProblems] of byDate) {
+      lines.push(`### ${date}`);
+      for (const p of dayProblems) {
+        const num   = p.number     ? ` (#${p.number})`          : "";
+        const diff  = p.difficulty ? ` [${p.difficulty}]`       : "";
+        const pat   = p.pattern    ? ` — ${p.pattern}`          : "";
+        const conf  = p.confidence ? ` — Confidence: ${p.confidence}/10` : "";
+        const emoji = p.approach === "Recalled" ? "🟢" : p.approach === "Reasoned" ? "🟡" : p.approach === "Needed hints" ? "🔴" : "";
+        lines.push(`- [x] **${p.name}**${num}${diff}${pat}${conf}`);
+        const meta = [p.approach ? `${emoji} ${p.approach}` : null, p.timeMins ? `Time: ${p.timeMins} min` : null].filter(Boolean).join(" | ");
+        if (meta) lines.push(`  - ${meta}`);
+        if (p.notes) lines.push(`  - Notes: ${p.notes}`);
+      }
+      lines.push("");
+    }
+
+    if (problems.length === 0) { lines.push("_No problems logged yet._", ""); }
+
+    fs.writeFileSync(PROGRESS_MD_PATH, (header ? header + "\n" : "") + lines.join("\n"), "utf-8");
+  } catch (e) {
+    console.error("Failed to regenerate PROGRESS.md:", e);
+  }
+}
+
+server.tool(
+  "get_leetcode_problems",
+  "Get logged LeetCode problems. Optionally filter by recency in days (default 30).",
+  { days: z.number().int().optional().describe("Look back N days. Omit for all problems.") },
+  async ({ days }) => {
+    const sql = days
+      ? `SELECT * FROM "LeetCodeProblem" WHERE date >= ? ORDER BY date DESC`
+      : `SELECT * FROM "LeetCodeProblem" ORDER BY date DESC`;
+    const args = days ? [subDays(new Date(), days).toISOString()] : [];
+    const result = await db.execute({ sql, args });
+    const problems = result.rows;
+    if (problems.length === 0) return { content: [{ type: "text" as const, text: "No problems logged yet." }] };
+    const lines = problems.map((p) =>
+      `${(p.date as string).slice(0, 10)}: ${p.name}${p.number ? ` #${p.number}` : ""}${p.pattern ? ` [${p.pattern}]` : ""}${p.confidence ? ` conf ${p.confidence}/10` : ""}${p.approach ? ` — ${p.approach}` : ""}`
+    );
+    return { content: [{ type: "text" as const, text: `${problems.length} problem(s):\n\n${lines.join("\n")}` }] };
+  }
+);
+
+server.tool(
+  "log_leetcode_problem",
+  "Log a completed LeetCode problem with pattern, confidence, and approach.",
+  {
+    name:       z.string().describe("Problem name e.g. 'Two Sum'"),
+    number:     z.number().int().optional().describe("LeetCode problem number e.g. 1"),
+    pattern:    z.enum(["Two Pointers","Sliding Window","Hashmap","Binary Search","Trees BFS","Trees DFS","Stack","Queue","Linked List","Dynamic Programming","Greedy","Other"]).optional(),
+    difficulty: z.enum(["Easy","Medium","Hard"]).optional(),
+    timeMins:   z.number().int().optional().describe("How long it took in minutes"),
+    approach:   z.enum(["Recalled","Reasoned","Needed hints"]).optional(),
+    confidence: z.number().int().min(1).max(10).optional().describe("Honest confidence score 1-10"),
+    notes:      z.string().optional().describe("What tripped you up, what clicked"),
+    date:       z.string().optional().describe("Date in YYYY-MM-DD, defaults to today"),
+  },
+  async ({ name, number, pattern, difficulty, timeMins, approach, confidence, notes, date }) => {
+    const isoNow = new Date().toISOString();
+    const isoDate = date ? new Date(date + "T12:00:00.000Z").toISOString() : isoNow;
+    const id = uid();
+    await db.execute({
+      sql: `INSERT INTO "LeetCodeProblem" (id, date, name, number, pattern, difficulty, timeMins, approach, confidence, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, isoDate, name, number ?? null, pattern ?? null, difficulty ?? null, timeMins ?? null, approach ?? null, confidence ?? null, notes ?? null, isoNow, isoNow],
+    });
+    await regenerateProgressMd();
+    const confStr = confidence ? ` Confidence: ${confidence}/10.` : "";
+    const approachStr = approach ? ` Approach: ${approach}.` : "";
+    return { content: [{ type: "text" as const, text: `Logged "${name}"${number ? ` #${number}` : ""}${pattern ? ` [${pattern}]` : ""}.${approachStr}${confStr} PROGRESS.md updated.` }] };
+  }
+);
+
+// ─── MACRO LEARNING ───────────────────────────────────────────────────────────
+
+const MACRO_PROGRESS_PATH = path.join(process.env.HOME ?? "~", "macro learning", "progress.md");
+
+const MACRO_TRACK_NAMES: Record<number, string> = {
+  1: "Options Pricing Theory & Practice",
+  2: "Futures Contracts",
+  3: "Volatility Modelling",
+  4: "Index-Based Quant Strategies",
+  5: "Behavioural / Narrative",
+};
+const MACRO_LEVEL_EMOJI: Record<string, string> = { recall: "🔵", application: "🟢", shaky: "🟠" };
+
+async function regenerateMacroProgress(): Promise<void> {
+  try {
+    const result = await db.execute(`SELECT * FROM "MacroTopic" ORDER BY track ASC, coveredAt ASC`);
+    const topics = result.rows;
+    const today = format(new Date(), "yyyy-MM-dd");
+    const appCount   = topics.filter((t) => t.level === "application").length;
+    const shakyCount = topics.filter((t) => t.level === "shaky").length;
+
+    const lines: string[] = [
+      `# Macro Learning Progress — Last updated: ${today}`, "",
+      "**Level key:** 🔵 Recall — 🟢 Application — 🟠 Shaky (needs revisiting)", "", "---", "",
+    ];
+
+    const byTrack = new Map<number, typeof topics>();
+    for (const t of topics) {
+      const tr = (t.track as number) ?? 0;
+      if (!byTrack.has(tr)) byTrack.set(tr, []);
+      byTrack.get(tr)!.push(t);
+    }
+
+    for (const trackNum of [1, 2, 3, 4, 5]) {
+      const trackTopics = byTrack.get(trackNum) ?? [];
+      lines.push(`## Track ${trackNum} — ${MACRO_TRACK_NAMES[trackNum]}`, "");
+      if (trackTopics.length === 0) {
+        lines.push("- *Not started*");
+      } else {
+        for (const t of trackTopics) {
+          const emoji = MACRO_LEVEL_EMOJI[t.level as string] ?? "🔵";
+          const noteStr = t.notes ? ` — ${t.notes}` : "";
+          lines.push(`- ${emoji} **${t.topic}** (${(t.coveredAt as string).slice(0, 10)})${noteStr}`);
+        }
+      }
+      lines.push("");
+    }
+
+    lines.push("---", "", `**${topics.length} topics covered** — ${appCount} at application level, ${shakyCount} flagged shaky`, "");
+    fs.writeFileSync(MACRO_PROGRESS_PATH, lines.join("\n"), "utf-8");
+  } catch (e) {
+    console.error("Failed to regenerate macro progress.md:", e);
+  }
+}
+
+server.tool(
+  "get_macro_topics",
+  "Get all logged macro learning topics, optionally filtered by level or track.",
+  {
+    level: z.enum(["recall", "application", "shaky"]).optional().describe("Filter by level"),
+    track: z.number().int().min(1).max(5).optional().describe("Filter by track (1=Options, 2=Futures, 3=Vol, 4=Index, 5=Narrative)"),
+  },
+  async ({ level, track }) => {
+    let sql = `SELECT * FROM "MacroTopic" WHERE 1=1`;
+    const args: unknown[] = [];
+    if (level) { sql += ` AND level = ?`; args.push(level); }
+    if (track) { sql += ` AND track = ?`; args.push(track); }
+    sql += ` ORDER BY track ASC, coveredAt ASC`;
+    const result = await db.execute({ sql, args });
+    const topics = result.rows;
+    if (topics.length === 0) return { content: [{ type: "text" as const, text: "No topics logged yet." }] };
+    const lines = topics.map((t) =>
+      `[Track ${t.track ?? "?"}] ${MACRO_LEVEL_EMOJI[t.level as string] ?? "🔵"} ${t.topic} (${(t.coveredAt as string).slice(0, 10)})${t.notes ? ` — ${t.notes}` : ""}`
+    );
+    const shaky = topics.filter((t) => t.level === "shaky");
+    let summary = `${topics.length} topic(s):\n\n${lines.join("\n")}`;
+    if (shaky.length > 0) summary += `\n\n⚠️ Shaky — needs revisiting: ${shaky.map((t) => t.topic).join(", ")}`;
+    return { content: [{ type: "text" as const, text: summary }] };
+  }
+);
+
+server.tool(
+  "log_macro_topic",
+  "Log a covered macro finance topic with level and notes. Updates progress.md automatically.",
+  {
+    topic:     z.string().describe("Topic name e.g. 'Black-Scholes assumptions & formula'"),
+    track:     z.number().int().min(1).max(5).optional().describe("Curriculum track: 1=Options, 2=Futures, 3=Vol Modelling, 4=Index Strategies, 5=Narrative"),
+    level:     z.enum(["recall", "application", "shaky"]).optional().describe("Depth reached — recall (knows it), application (can use it), shaky (covered but not retained). Defaults to recall."),
+    notes:     z.string().optional().describe("One-line summary of what was covered"),
+    coveredAt: z.string().optional().describe("Date in YYYY-MM-DD, defaults to today"),
+  },
+  async ({ topic, track, level, notes, coveredAt }) => {
+    const isoNow = new Date().toISOString();
+    const isoDate = coveredAt ? new Date(coveredAt + "T12:00:00.000Z").toISOString() : isoNow;
+    const id = uid();
+    await db.execute({
+      sql: `INSERT INTO "MacroTopic" (id, topic, track, level, coveredAt, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, topic, track ?? null, level ?? "recall", isoDate, notes ?? null, isoNow, isoNow],
+    });
+    await regenerateMacroProgress();
+    const trackStr = track ? ` [Track ${track} — ${MACRO_TRACK_NAMES[track]}]` : "";
+    const levelStr = level ?? "recall";
+    return { content: [{ type: "text" as const, text: `Logged "${topic}"${trackStr} at ${MACRO_LEVEL_EMOJI[levelStr]} ${levelStr} level. progress.md updated.` }] };
+  }
+);
+
+server.tool(
+  "update_macro_topic",
+  "Update the level of an existing macro topic (e.g. promote from recall to application, or flag as shaky).",
+  {
+    topic: z.string().describe("Topic name to find (partial match, case-insensitive)"),
+    level: z.enum(["recall", "application", "shaky"]).describe("New level"),
+    notes: z.string().optional().describe("Updated notes"),
+  },
+  async ({ topic, level, notes }) => {
+    const existing = await db.execute({
+      sql: `SELECT id, topic FROM "MacroTopic" WHERE topic LIKE ? ORDER BY coveredAt DESC LIMIT 1`,
+      args: [`%${topic}%`],
+    });
+    if (existing.rows.length === 0) {
+      return { content: [{ type: "text" as const, text: `No topic found matching "${topic}". Use log_macro_topic to create it.` }] };
+    }
+    const row = existing.rows[0];
+    const isoNow = new Date().toISOString();
+    const updates = ["level = ?", "updatedAt = ?"];
+    const args: unknown[] = [level, isoNow];
+    if (notes !== undefined) { updates.push("notes = ?"); args.push(notes); }
+    args.push(row.id);
+    await db.execute({ sql: `UPDATE "MacroTopic" SET ${updates.join(", ")} WHERE id = ?`, args });
+    await regenerateMacroProgress();
+    return { content: [{ type: "text" as const, text: `Updated "${row.topic}" → ${MACRO_LEVEL_EMOJI[level]} ${level}. progress.md updated.` }] };
+  }
+);
+
 // ─── START SERVER ─────────────────────────────────────────────────────────────
 
 async function main() {

@@ -299,6 +299,40 @@ model JobApplication {
 }
 
 // ─────────────────────────────────────────
+// LEETCODE PROBLEMS
+// ─────────────────────────────────────────
+
+model LeetCodeProblem {
+  id         String   @id @default(cuid())
+  date       DateTime
+  name       String
+  number     Int?
+  pattern    String?  // "Two Pointers" | "Hashmap" | "Sliding Window" | "Binary Search" | "Trees" | "DP" | "Stack" | "Other"
+  difficulty String?  // "Easy" | "Medium" | "Hard"
+  timeMins   Int?     // how long it took
+  approach   String?  // "Recalled" | "Reasoned" | "Needed hints"
+  confidence Int?     // 1–10
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────
+// MACRO LEARNING TOPICS
+// ─────────────────────────────────────────
+
+model MacroTopic {
+  id        String   @id @default(cuid())
+  topic     String   // topic name e.g. "Black-Scholes pricing model"
+  track     Int?     // 1=Options, 2=Futures, 3=Vol Modelling, 4=Index Strategies, 5=Narrative
+  level     String   @default("recall") // "recall" | "application" | "shaky"
+  coveredAt DateTime
+  notes     String?  // one-line summary of what was covered
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────
 // WORK FROM HOME DAYS
 // ─────────────────────────────────────────
 
