@@ -83,6 +83,12 @@ export async function regenerateTrackerMd(): Promise<void> {
       if (a.notes) {
         lines.push(`- **Notes:** ${a.notes}`);
       }
+      if (a.cvPath) {
+        lines.push(`- **CV used:** ${a.cvPath}`);
+      }
+      if (a.coverLetterPath) {
+        lines.push(`- **Cover letter:** ${a.coverLetterPath}`);
+      }
       lines.push("");
       lines.push("---");
       lines.push("");

@@ -291,11 +291,13 @@ model JobApplication {
   appliedDate DateTime?
   lastAction  String?   // free-text description of last action
   nextAction  String?   // free-text description of next action
-  prepNeeded  Boolean   @default(false)
-  prepNotes   String?   // what to prep specifically
-  notes       String?   // general notes
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  prepNeeded      Boolean   @default(false)
+  prepNotes       String?   // what to prep specifically
+  notes           String?   // general notes
+  cvPath          String?   // relative path e.g. "CVs/Ben_Haras-Gummer_GSS.pdf"
+  coverLetterPath String?   // relative path e.g. "applications/GSS_cover_letter.md"
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
 
 // ─────────────────────────────────────────

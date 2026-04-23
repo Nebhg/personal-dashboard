@@ -25,6 +25,8 @@ export async function PATCH(
         ...(body.prepNeeded  !== undefined && { prepNeeded:  body.prepNeeded }),
         ...(body.prepNotes   !== undefined && { prepNotes:   body.prepNotes }),
         ...(body.notes       !== undefined && { notes:       body.notes }),
+        ...(body.cvPath            !== undefined && { cvPath:            body.cvPath }),
+        ...(body.coverLetterPath   !== undefined && { coverLetterPath:   body.coverLetterPath }),
       },
     });
 
