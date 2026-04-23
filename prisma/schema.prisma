@@ -280,6 +280,25 @@ model RecurringBlock {
 }
 
 // ─────────────────────────────────────────
+// CAREER / JOB APPLICATIONS
+// ─────────────────────────────────────────
+
+model JobApplication {
+  id          String    @id @default(cuid())
+  firm        String
+  role        String?
+  stage       String    @default("APPLIED") // "APPLIED"|"SCREEN"|"TECHNICAL"|"FINAL"|"OFFER"|"REJECTED"|"GHOSTED"
+  appliedDate DateTime?
+  lastAction  String?   // free-text description of last action
+  nextAction  String?   // free-text description of next action
+  prepNeeded  Boolean   @default(false)
+  prepNotes   String?   // what to prep specifically
+  notes       String?   // general notes
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// ─────────────────────────────────────────
 // WORK FROM HOME DAYS
 // ─────────────────────────────────────────
 

@@ -11,6 +11,7 @@ import {
   Flame,
   TrendingUp,
   Calendar,
+  Briefcase,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -23,7 +24,7 @@ export default async function DashboardPage() {
   const weekStart = startOfWeek(now, { weekStartsOn: 1 });
   const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
 
-  const [todayMeals, weekWorkouts, weekSessions, habitsWithLogs] = await Promise.all([
+  const [todayMeals, weekWorkouts, weekSessions, habitsWithLogs, activeApplications] = await Promise.all([
     prisma.mealLog.findMany({
       where: { date: { gte: todayStart, lte: todayEnd } },
     }),
@@ -40,6 +41,10 @@ export default async function DashboardPage() {
           orderBy: { date: "desc" },
         },
       },
+    }),
+    prisma.jobApplication.findMany({
+      where: { stage: { notIn: ["REJECTED", "GHOSTED"] } },
+      orderBy: { updatedAt: "desc" },
     }),
   ]);
 
@@ -70,7 +75,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Today's summary */}
-      <div className="grid grid-cols-2 gap-4 mb-6 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 mb-6 sm:grid-cols-5">
         <Link href="/diet">
           <Card className="hover:shadow-md transition-shadow cursor-pointer">
             <CardContent className="p-4">
@@ -126,6 +131,24 @@ export default async function DashboardPage() {
               <p className="text-xs text-muted-foreground">active habits</p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {habitStreaks.filter((h) => h.todayLog?.kept).length} kept today
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/career">
+          <Card className="hover:shadow-md transition-shadow cursor-pointer">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Briefcase className="h-4 w-4 text-blue-400" />
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Career</span>
+              </div>
+              <p className="text-2xl font-bold">{activeApplications.length}</p>
+              <p className="text-xs text-muted-foreground">active applications</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {activeApplications.filter((a) => a.prepNeeded).length > 0
+                  ? `${activeApplications.filter((a) => a.prepNeeded).length} need prep`
+                  : "no prep flagged"}
               </p>
             </CardContent>
           </Card>

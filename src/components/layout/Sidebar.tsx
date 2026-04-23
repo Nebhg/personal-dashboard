@@ -11,6 +11,7 @@ import {
   BookOpen,
   Target,
   MessageSquare,
+  Briefcase,
   Sun,
   Moon,
 } from "lucide-react";
@@ -18,12 +19,13 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/calendar", label: "Calendar", icon: Calendar },
-  { href: "/diet", label: "Diet", icon: Utensils },
-  { href: "/exercise", label: "Exercise", icon: Dumbbell },
-  { href: "/learning", label: "Learning", icon: BookOpen },
-  { href: "/habits", label: "Habits", icon: Target },
-  { href: "/ai", label: "AI Coach", icon: MessageSquare },
+  { href: "/career",    label: "Career",    icon: Briefcase },
+  { href: "/calendar",  label: "Calendar",  icon: Calendar },
+  { href: "/diet",      label: "Diet",      icon: Utensils },
+  { href: "/exercise",  label: "Exercise",  icon: Dumbbell },
+  { href: "/learning",  label: "Learning",  icon: BookOpen },
+  { href: "/habits",    label: "Habits",    icon: Target },
+  { href: "/ai",        label: "AI Coach",  icon: MessageSquare },
 ];
 
 export function Sidebar() {

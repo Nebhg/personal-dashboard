@@ -5,6 +5,62 @@ import { z } from "zod";
 import { createClient } from "@libsql/client";
 import { startOfDay, subDays, format } from "date-fns";
 import { randomUUID } from "crypto";
+import * as fs from "fs";
+import * as path from "path";
+
+const TRACKER_MD_PATH = path.join(process.env.HOME ?? "~", "career_tracker", "tracker.md");
+
+const STAGE_LABELS: Record<string, string> = {
+  APPLIED: "Applied", SCREEN: "Talent Screen", TECHNICAL: "Technical",
+  FINAL: "Final Round", OFFER: "Offer", REJECTED: "Rejected", GHOSTED: "Ghosted",
+};
+
+async function regenerateTrackerMd(): Promise<void> {
+  try {
+    const result = await db.execute(`SELECT * FROM "JobApplication" ORDER BY
+      CASE stage WHEN 'FINAL' THEN 1 WHEN 'TECHNICAL' THEN 2 WHEN 'SCREEN' THEN 3
+      WHEN 'APPLIED' THEN 4 WHEN 'OFFER' THEN 5 ELSE 6 END, updatedAt DESC`);
+
+    const today = format(new Date(), "yyyy-MM-dd");
+    const active = result.rows.filter((r) => !["REJECTED","GHOSTED"].includes(r.stage as string));
+    const closed = result.rows.filter((r) => ["REJECTED","GHOSTED"].includes(r.stage as string));
+
+    const sections: string[] = [`# Career Tracker — Last updated: ${today}`, "", "---", "", "## ACTIVE PIPELINE", ""];
+    for (const a of active) {
+      const role = a.role ? ` — ${a.role}` : " — [Role TBC]";
+      sections.push(`### ${a.firm}${role}`);
+      sections.push(`- **Stage:** ${STAGE_LABELS[a.stage as string] ?? a.stage}`);
+      sections.push(`- **Applied:** ${a.appliedDate ? format(new Date(a.appliedDate as string), "yyyy-MM-dd") : "Unknown"}`);
+      sections.push(`- **Last action:** ${a.lastAction ?? "—"}`);
+      sections.push(`- **Next action:** ${a.nextAction ?? "—"}`);
+      sections.push(`- **Prep needed:** ${a.prepNeeded ? "YES" : "NO"}${a.prepNotes ? ` — ${a.prepNotes}` : ""}`);
+      sections.push(`- **Notes:** ${a.notes ?? "—"}`);
+      sections.push("", "---", "");
+    }
+
+    sections.push("## CLOSED / INACTIVE", "");
+    for (const a of closed) {
+      const role = a.role ?? "[Role TBC]";
+      sections.push(`- ${a.firm} — ${role} (${STAGE_LABELS[a.stage as string] ?? a.stage})`);
+    }
+    sections.push("", "---", "", `## LOG`, "", `- ${today} — Tracker regenerated from dashboard DB`);
+
+    // Preserve existing log entries if file exists
+    if (fs.existsSync(TRACKER_MD_PATH)) {
+      const existing = fs.readFileSync(TRACKER_MD_PATH, "utf-8");
+      const logMatch = existing.match(/## LOG\n([\s\S]*)/);
+      if (logMatch) {
+        const oldLog = logMatch[1].trim();
+        sections[sections.length - 1] = `- ${today} — Tracker regenerated from dashboard DB`;
+        sections.push(...oldLog.split("\n").filter((l) => l.trim() && !l.includes("Tracker regenerated")));
+      }
+    }
+
+    fs.writeFileSync(TRACKER_MD_PATH, sections.join("\n"), "utf-8");
+  } catch (e) {
+    console.error("Failed to regenerate tracker.md:", e);
+  }
+}
 
 const dbUrl = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
 const db = createClient({ url: dbUrl });
@@ -855,6 +911,95 @@ server.tool(
       await db.execute({ sql: `DELETE FROM "WorkFromHomeDay" WHERE date = ?`, args: [isoDate] });
       return { content: [{ type: "text" as const, text: `${date} WFH marker removed (office day).` }] };
     }
+  }
+);
+
+// ─── CAREER / JOB APPLICATIONS ───────────────────────────────────────────────
+
+server.tool(
+  "get_applications",
+  "Get all job applications. Optionally filter to active only (excludes REJECTED and GHOSTED).",
+  {
+    activeOnly: z.boolean().optional().describe("If true, only return active applications (not rejected/ghosted). Defaults to false."),
+  },
+  async ({ activeOnly }) => {
+    const sql = activeOnly
+      ? `SELECT * FROM "JobApplication" WHERE stage NOT IN ('REJECTED','GHOSTED') ORDER BY updatedAt DESC`
+      : `SELECT * FROM "JobApplication" ORDER BY updatedAt DESC`;
+    const result = await db.execute(sql);
+    const apps = result.rows.map((r) => ({
+      id: r.id, firm: r.firm, role: r.role, stage: r.stage,
+      appliedDate: r.appliedDate, lastAction: r.lastAction, nextAction: r.nextAction,
+      prepNeeded: r.prepNeeded === 1, prepNotes: r.prepNotes, notes: r.notes,
+    }));
+    const summary = apps.map((a) =>
+      `${a.firm}${a.role ? ` (${a.role})` : ""} — ${a.stage}${a.nextAction ? ` | Next: ${a.nextAction}` : ""}${a.prepNeeded ? " ⚠️ PREP NEEDED" : ""}`
+    ).join("\n");
+    return { content: [{ type: "text" as const, text: apps.length === 0 ? "No applications found." : `${apps.length} application(s):\n\n${summary}` }] };
+  }
+);
+
+server.tool(
+  "add_application",
+  "Add a new job application to the career pipeline.",
+  {
+    firm:        z.string().describe("Company name e.g. 'B2C2'"),
+    role:        z.string().optional().describe("Role title e.g. 'Quant Developer'"),
+    stage:       z.enum(["APPLIED","SCREEN","TECHNICAL","FINAL","OFFER","REJECTED","GHOSTED"]).optional().describe("Current stage, defaults to APPLIED"),
+    appliedDate: z.string().optional().describe("Date applied in YYYY-MM-DD format"),
+    lastAction:  z.string().optional().describe("Description of last action taken"),
+    nextAction:  z.string().optional().describe("Description of next action needed"),
+    prepNeeded:  z.boolean().optional().describe("Whether prep is needed for next stage"),
+    prepNotes:   z.string().optional().describe("What specifically to prepare"),
+    notes:       z.string().optional().describe("General notes about this application"),
+  },
+  async ({ firm, role, stage, appliedDate, lastAction, nextAction, prepNeeded, prepNotes, notes }) => {
+    const isoNow = new Date().toISOString();
+    const id = uid();
+    const isoApplied = appliedDate ? new Date(appliedDate + "T00:00:00.000Z").toISOString() : null;
+    await db.execute({
+      sql: `INSERT INTO "JobApplication" (id, firm, role, stage, appliedDate, lastAction, nextAction, prepNeeded, prepNotes, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, firm, role ?? null, stage ?? "APPLIED", isoApplied, lastAction ?? null, nextAction ?? null, prepNeeded ? 1 : 0, prepNotes ?? null, notes ?? null, isoNow, isoNow],
+    });
+    await regenerateTrackerMd();
+    return { content: [{ type: "text" as const, text: `Added ${firm}${role ? ` — ${role}` : ""} at stage ${stage ?? "APPLIED"}. tracker.md updated.` }] };
+  }
+);
+
+server.tool(
+  "update_application",
+  "Update an existing job application — change stage, log an action, set next steps, flag prep needed.",
+  {
+    firm:       z.string().describe("Firm name to identify the application (partial match, case-insensitive)"),
+    stage:      z.enum(["APPLIED","SCREEN","TECHNICAL","FINAL","OFFER","REJECTED","GHOSTED"]).optional(),
+    lastAction: z.string().optional().describe("What just happened e.g. 'HackerRank completed 2026-04-21'"),
+    nextAction: z.string().optional().describe("What needs to happen next"),
+    prepNeeded: z.boolean().optional(),
+    prepNotes:  z.string().optional(),
+    notes:      z.string().optional(),
+  },
+  async ({ firm, stage, lastAction, nextAction, prepNeeded, prepNotes, notes }) => {
+    const existing = await db.execute({
+      sql: `SELECT id, firm, role FROM "JobApplication" WHERE firm LIKE ? ORDER BY updatedAt DESC LIMIT 1`,
+      args: [`%${firm}%`],
+    });
+    if (existing.rows.length === 0) {
+      return { content: [{ type: "text" as const, text: `No application found matching "${firm}". Use add_application to create it.` }] };
+    }
+    const app = existing.rows[0];
+    const isoNow = new Date().toISOString();
+    const updates: string[] = ["updatedAt = ?"];
+    const args: unknown[] = [isoNow];
+    if (stage      !== undefined) { updates.push("stage = ?");      args.push(stage); }
+    if (lastAction !== undefined) { updates.push("lastAction = ?"); args.push(lastAction); }
+    if (nextAction !== undefined) { updates.push("nextAction = ?"); args.push(nextAction); }
+    if (prepNeeded !== undefined) { updates.push("prepNeeded = ?"); args.push(prepNeeded ? 1 : 0); }
+    if (prepNotes  !== undefined) { updates.push("prepNotes = ?");  args.push(prepNotes); }
+    if (notes      !== undefined) { updates.push("notes = ?");      args.push(notes); }
+    args.push(app.id);
+    await db.execute({ sql: `UPDATE "JobApplication" SET ${updates.join(", ")} WHERE id = ?`, args });
+    await regenerateTrackerMd();
+    return { content: [{ type: "text" as const, text: `Updated ${app.firm}${app.role ? ` (${app.role})` : ""}${stage ? ` → ${stage}` : ""}. tracker.md updated.` }] };
   }
 );
 
