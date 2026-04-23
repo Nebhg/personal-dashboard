@@ -26,6 +26,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       name: data.name,
       description: data.description ?? null,
       scheduledDays: JSON.stringify(data.scheduledDays ?? []),
+      scheduledTime: data.scheduledTime ?? null,
       exercises: {
         create: data.exercises.map((ex, i) => ({
           name: ex.name,

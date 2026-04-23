@@ -19,6 +19,7 @@ export async function POST(req: Request) {
       name: data.name,
       description: data.description ?? null,
       scheduledDays: JSON.stringify(data.scheduledDays ?? []),
+      scheduledTime: data.scheduledTime ?? null,
       exercises: {
         create: data.exercises.map((ex, i) => ({
           name: ex.name,

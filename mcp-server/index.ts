@@ -787,6 +787,77 @@ server.tool(
   }
 );
 
+server.tool(
+  "get_recurring_blocks",
+  "Get all recurring schedule blocks (e.g. Work 9-5, Commute)",
+  {},
+  async () => {
+    const res = await db.execute(`SELECT * FROM "RecurringBlock" ORDER BY createdAt ASC`);
+    const result = res.rows.map((b) => ({
+      id: b.id,
+      title: b.title,
+      category: b.category,
+      startTime: b.startTime,
+      endTime: b.endTime,
+      daysOfWeek: JSON.parse(b.daysOfWeek as string),
+      endsOn: b.endsOn,
+      notes: b.notes,
+    }));
+    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "create_recurring_block",
+  "Create a recurring weekly event (e.g. Work Mon-Fri 9am-5pm, Commute 8-9am)",
+  {
+    title: z.string().describe("Event title e.g. 'Work', 'Commute to office'"),
+    category: z.enum(["GYM", "LEARNING", "SLEEP", "WORK", "COMMUTE", "PERSONAL"]),
+    startTime: z.string().describe("Start time in HH:MM format e.g. '09:00'"),
+    endTime: z.string().describe("End time in HH:MM format e.g. '17:00'"),
+    daysOfWeek: z.array(z.number().int().min(0).max(6)).describe("Days of week: 0=Sun, 1=Mon, ..., 6=Sat"),
+    endsOn: z.string().optional().describe("Optional end date ISO string"),
+    notes: z.string().optional(),
+  },
+  async ({ title, category, startTime, endTime, daysOfWeek, endsOn, notes }) => {
+    const CATEGORY_COLORS: Record<string, string> = {
+      GYM: "#3b82f6", LEARNING: "#a855f7", SLEEP: "#64748b",
+      WORK: "#0ea5e9", COMMUTE: "#f59e0b", PERSONAL: "#ec4899",
+    };
+    const isoNow = new Date().toISOString();
+    const id = uid();
+    await db.execute({
+      sql: `INSERT INTO "RecurringBlock" (id, title, category, color, startTime, endTime, daysOfWeek, endsOn, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, title, category, CATEGORY_COLORS[category] ?? "#6366f1", startTime, endTime, JSON.stringify(daysOfWeek), endsOn ?? null, notes ?? null, isoNow, isoNow],
+    });
+    const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dayStr = daysOfWeek.map((d) => DAY_NAMES[d]).join(", ");
+    return { content: [{ type: "text" as const, text: `Created recurring block "${title}" (${startTime}–${endTime}) on ${dayStr}.` }] };
+  }
+);
+
+server.tool(
+  "toggle_wfh_day",
+  "Mark or unmark a date as a work-from-home day. WFH work events show a 🏠 icon in the calendar.",
+  {
+    date: z.string().describe("Date in YYYY-MM-DD format"),
+    wfh: z.boolean().describe("true = mark as WFH, false = remove WFH marker (office day)"),
+  },
+  async ({ date, wfh }) => {
+    const isoDate = new Date(date + "T00:00:00.000Z").toISOString();
+    if (wfh) {
+      const existing = await db.execute({ sql: `SELECT id FROM "WorkFromHomeDay" WHERE date = ?`, args: [isoDate] });
+      if (existing.rows.length === 0) {
+        await db.execute({ sql: `INSERT INTO "WorkFromHomeDay" (id, date) VALUES (?, ?)`, args: [uid(), isoDate] });
+      }
+      return { content: [{ type: "text" as const, text: `${date} marked as WFH day.` }] };
+    } else {
+      await db.execute({ sql: `DELETE FROM "WorkFromHomeDay" WHERE date = ?`, args: [isoDate] });
+      return { content: [{ type: "text" as const, text: `${date} WFH marker removed (office day).` }] };
+    }
+  }
+);
+
 // ─── START SERVER ─────────────────────────────────────────────────────────────
 
 async function main() {

@@ -32,6 +32,7 @@ export const workoutPlanSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().optional().nullable(),
   scheduledDays: z.array(z.number().int().min(0).max(6)),
+  scheduledTime: z.string().regex(/^\d{2}:\d{2}$/).optional().nullable(),
   exercises: z.array(workoutPlanExerciseSchema),
 });
 

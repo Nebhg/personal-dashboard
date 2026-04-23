@@ -9,6 +9,8 @@ export type CalendarEventDTO = {
   area: string;
   color: string | null;
   description: string | null;
+  isWFH?: boolean;       // WORK-category recurring events on WFH days
+  isRecurring?: boolean; // generated from RecurringBlock
 };
 
 export const AREA_COLORS: Record<string, string> = {

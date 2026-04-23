@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { CalendarView } from "@/components/calendar/CalendarView";
-import { startOfMonth, endOfMonth } from "date-fns";
+import { startOfMonth, endOfMonth, format } from "date-fns";
 import { type CalendarEventDTO } from "@/types";
 import { generateScheduleEvents } from "@/lib/calendar-utils";
 import { Calendar } from "lucide-react";
@@ -10,18 +10,35 @@ export default async function CalendarPage() {
   const monthStart = startOfMonth(now);
   const monthEnd = endOfMonth(now);
 
-  const [storedEvents, workoutPlans, mealPlanEntries] = await Promise.all([
-    prisma.calendarEvent.findMany({
-      where: { start: { gte: monthStart }, end: { lte: monthEnd } },
-      orderBy: { start: "asc" },
-    }),
-    prisma.workoutPlan.findMany({ select: { id: true, name: true, scheduledDays: true } }),
-    prisma.mealPlanEntry.findMany({
-      include: { recipe: { select: { name: true, calories: true } } },
-    }),
-  ]);
+  const [storedEvents, workoutPlans, mealPlanEntries, recurringBlocks, wfhDays] =
+    await Promise.all([
+      prisma.calendarEvent.findMany({
+        where: { start: { gte: monthStart }, end: { lte: monthEnd } },
+        orderBy: { start: "asc" },
+      }),
+      prisma.workoutPlan.findMany({
+        select: { id: true, name: true, scheduledDays: true, scheduledTime: true },
+      }),
+      prisma.mealPlanEntry.findMany({
+        include: { recipe: { select: { name: true, calories: true } } },
+      }),
+      prisma.recurringBlock.findMany(),
+      prisma.workFromHomeDay.findMany({
+        where: { date: { gte: monthStart, lte: monthEnd } },
+      }),
+    ]);
 
-  const virtualEvents = generateScheduleEvents(monthStart, monthEnd, workoutPlans, mealPlanEntries);
+  const wfhDateSet = new Set(wfhDays.map((d) => format(d.date, "yyyy-MM-dd")));
+  const wfhDateStrings = Array.from(wfhDateSet);
+
+  const virtualEvents = generateScheduleEvents(
+    monthStart,
+    monthEnd,
+    workoutPlans,
+    mealPlanEntries,
+    recurringBlocks,
+    wfhDateSet
+  );
 
   const serialized: CalendarEventDTO[] = [
     ...storedEvents.map((e) => ({
@@ -43,7 +60,7 @@ export default async function CalendarPage() {
         <Calendar className="h-6 w-6 text-blue-500" />
         Calendar
       </h1>
-      <CalendarView initialEvents={serialized} />
+      <CalendarView initialEvents={serialized} initialWfhDates={wfhDateStrings} />
     </div>
   );
 }

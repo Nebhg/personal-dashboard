@@ -135,6 +135,7 @@ model WorkoutPlan {
   name          String
   description   String?
   scheduledDays String               @default("[]") // JSON array of 0-6 (0=Sun,1=Mon,...,6=Sat)
+  scheduledTime String?              // "HH:MM" e.g. "07:00" — used for virtual calendar events
   exercises     WorkoutPlanExercise[]
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
@@ -258,4 +259,31 @@ model ScheduleBlock {
   updatedAt DateTime @updatedAt
 
   calendarEvent CalendarEvent?
+}
+
+// ─────────────────────────────────────────
+// RECURRING SCHEDULE BLOCKS (virtual events)
+// ─────────────────────────────────────────
+
+model RecurringBlock {
+  id          String    @id @default(cuid())
+  title       String
+  category    String    // "GYM" | "LEARNING" | "SLEEP" | "WORK" | "COMMUTE" | "PERSONAL"
+  color       String?
+  startTime   String    // "HH:MM" 24-hour
+  endTime     String    // "HH:MM" 24-hour
+  daysOfWeek  String    @default("[]") // JSON int array of 0-6 (0=Sun)
+  endsOn      DateTime? // optional recurrence end date (inclusive)
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// ─────────────────────────────────────────
+// WORK FROM HOME DAYS
+// ─────────────────────────────────────────
+
+model WorkFromHomeDay {
+  id   String   @id @default(cuid())
+  date DateTime @unique // start of day UTC (YYYY-MM-DDT00:00:00.000Z)
 }

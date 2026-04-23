@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { WorkoutForm } from "@/components/exercise/WorkoutForm";
 import { WorkoutPlanForm } from "@/components/exercise/WorkoutPlanForm";
 import { WorkoutPlanTable } from "@/components/exercise/WorkoutPlanTable";
 import { WorkoutWeeklySchedule } from "@/components/exercise/WorkoutWeeklySchedule";
@@ -15,28 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Dumbbell, Trash2, Clock, ClipboardList, CalendarDays, Pencil } from "lucide-react";
-import { format } from "date-fns";
-
-interface ExerciseSet {
-  id: string;
-  name: string;
-  sets: number | null;
-  reps: number | null;
-  weightKg: number | null;
-  distanceKm: number | null;
-  order: number;
-}
-
-interface Workout {
-  id: string;
-  date: string;
-  name: string;
-  type: string;
-  durationMin: number;
-  notes: string | null;
-  exercises: ExerciseSet[];
-}
+import { Plus, Dumbbell, Trash2, ClipboardList, CalendarDays, Pencil } from "lucide-react";
 
 interface PlanExercise {
   id: string;
@@ -54,27 +32,26 @@ interface WorkoutPlan {
   name: string;
   description: string | null;
   scheduledDays: string;
+  scheduledTime: string | null;
   exercises: PlanExercise[];
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  strength: "bg-blue-900/50 text-blue-300",
-  cardio: "bg-red-900/50 text-red-300",
-  mobility: "bg-green-900/50 text-green-300",
-  sport: "bg-purple-900/50 text-purple-300",
-};
+interface WorkoutSession {
+  id: string;
+  date: string;
+  name: string;
+}
 
 export default function ExercisePage() {
-  const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [sessions, setSessions] = useState<WorkoutSession[]>([]);
   const [plans, setPlans] = useState<WorkoutPlan[]>([]);
-  const [logOpen, setLogOpen] = useState(false);
   const [newPlanOpen, setNewPlanOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<WorkoutPlan | null>(null);
   const [editPlanOpen, setEditPlanOpen] = useState(false);
 
-  const loadWorkouts = useCallback(async () => {
+  const loadSessions = useCallback(async () => {
     const res = await fetch("/api/exercise");
-    setWorkouts(await res.json());
+    setSessions(await res.json());
   }, []);
 
   const loadPlans = useCallback(async () => {
@@ -82,26 +59,20 @@ export default function ExercisePage() {
     setPlans(await res.json());
   }, []);
 
-  useEffect(() => {
-    loadWorkouts();
-    loadPlans();
-  }, [loadWorkouts, loadPlans]);
+  const refresh = useCallback(async () => {
+    await Promise.all([loadSessions(), loadPlans()]);
+  }, [loadSessions, loadPlans]);
 
-  async function deleteWorkout(id: string) {
-    if (!confirm("Delete this workout?")) return;
-    await fetch(`/api/exercise/${id}`, { method: "DELETE" });
-    loadWorkouts();
-  }
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   async function deletePlan(id: string) {
-    if (!confirm("Delete this plan?")) return;
+    if (!confirm("Delete this workout?")) return;
     await fetch(`/api/exercise/plans/${id}`, { method: "DELETE" });
     loadPlans();
   }
 
-  const totalMinutes = workouts.reduce((s, w) => s + w.durationMin, 0);
-
-  // Sessions per week from schedule
   const sessionsPerWeek = plans.reduce((acc, plan) => {
     let days: number[] = [];
     try { days = JSON.parse(plan.scheduledDays); } catch { days = []; }
@@ -109,7 +80,7 @@ export default function ExercisePage() {
   }, 0);
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -117,7 +88,7 @@ export default function ExercisePage() {
             Exercise
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {workouts.length} sessions logged · {Math.round(totalMinutes / 60)}h total · {sessionsPerWeek}×/week scheduled
+            {sessions.length} sessions logged · {sessionsPerWeek}×/week scheduled
           </p>
         </div>
       </div>
@@ -132,18 +103,18 @@ export default function ExercisePage() {
             <ClipboardList className="h-3.5 w-3.5" />
             Workouts
           </TabsTrigger>
-          <TabsTrigger value="sessions" className="gap-1.5">
-            <Clock className="h-3.5 w-3.5" />
-            Sessions
-          </TabsTrigger>
         </TabsList>
 
-        {/* ── WEEKLY SCHEDULE TAB ─────────────────────────────── */}
+        {/* ── WEEKLY SCHEDULE TAB ─── */}
         <TabsContent value="schedule">
-          <WorkoutWeeklySchedule plans={plans} onSessionLogged={loadWorkouts} />
+          <WorkoutWeeklySchedule
+            plans={plans}
+            sessions={sessions}
+            onRefresh={refresh}
+          />
         </TabsContent>
 
-        {/* ── PLANS TAB ─────────────────────────────── */}
+        {/* ── WORKOUTS TAB ─── */}
         <TabsContent value="plans">
           <div className="flex justify-end mb-3">
             <Dialog open={newPlanOpen} onOpenChange={setNewPlanOpen}>
@@ -153,7 +124,7 @@ export default function ExercisePage() {
                   New Workout
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-3xl">
+              <DialogContent className="w-[70vw] !max-w-none max-h-[70vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Create Workout</DialogTitle>
                 </DialogHeader>
@@ -162,9 +133,9 @@ export default function ExercisePage() {
             </Dialog>
           </div>
 
-          {/* Edit dialog — controlled externally via setEditingPlan */}
+          {/* Edit dialog */}
           <Dialog open={editPlanOpen} onOpenChange={setEditPlanOpen}>
-            <DialogContent className="max-w-3xl">
+            <DialogContent className="w-[70vw] !max-w-none max-h-[70vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Edit Workout</DialogTitle>
               </DialogHeader>
@@ -175,6 +146,7 @@ export default function ExercisePage() {
                     name: editingPlan.name,
                     description: editingPlan.description ?? "",
                     scheduledDays: (() => { try { return JSON.parse(editingPlan.scheduledDays); } catch { return []; } })(),
+                    scheduledTime: editingPlan.scheduledTime ?? null,
                     exercises: editingPlan.exercises,
                   }}
                   onSuccess={() => { setEditPlanOpen(false); loadPlans(); }}
@@ -238,102 +210,6 @@ export default function ExercisePage() {
                 </Card>
               );
             })}
-          </div>
-        </TabsContent>
-
-        {/* ── SESSIONS TAB ─────────────────────────────── */}
-        <TabsContent value="sessions">
-          <div className="flex justify-end mb-3">
-            <Dialog open={logOpen} onOpenChange={setLogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" className="gap-1">
-                  <Plus className="h-4 w-4" />
-                  Log Workout
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl">
-                <DialogHeader>
-                  <DialogTitle>Log Workout</DialogTitle>
-                </DialogHeader>
-                <WorkoutForm onSuccess={() => { setLogOpen(false); loadWorkouts(); }} />
-              </DialogContent>
-            </Dialog>
-          </div>
-
-          {workouts.length === 0 && (
-            <div className="text-center py-16 text-muted-foreground">
-              <Dumbbell className="h-12 w-12 mx-auto mb-3 opacity-20" />
-              <p className="font-medium">No workouts logged yet</p>
-              <p className="text-sm mt-1">Go to the Schedule tab and click a workout to log it</p>
-            </div>
-          )}
-
-          <div className="space-y-3">
-            {workouts.map((workout) => (
-              <Card key={workout.id} className="hover:shadow-sm transition-shadow">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${TYPE_COLORS[workout.type] ?? "bg-muted text-muted-foreground"}`}>
-                          {workout.type}
-                        </span>
-                        <h3 className="font-semibold text-sm">{workout.name}</h3>
-                      </div>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                        <span>{format(new Date(workout.date), "MMM d, yyyy")}</span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          {workout.durationMin}min
-                        </span>
-                      </div>
-
-                      {workout.exercises.length > 0 && (
-                        <div className="mt-3 overflow-x-auto">
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="border-b text-muted-foreground">
-                                <th className="text-left py-1 pr-4 font-medium">Exercise</th>
-                                <th className="text-center py-1 px-2 font-medium">Sets×Reps</th>
-                                <th className="text-center py-1 px-2 font-medium">Weight</th>
-                                <th className="text-center py-1 pl-2 font-medium">Dist</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {workout.exercises.sort((a, b) => a.order - b.order).map((ex) => (
-                                <tr key={ex.id} className="border-b last:border-0">
-                                  <td className="py-1 pr-4">{ex.name}</td>
-                                  <td className="py-1 px-2 text-center text-muted-foreground">
-                                    {ex.sets && ex.reps ? `${ex.sets}×${ex.reps}` : (ex.sets ?? ex.reps ?? "—")}
-                                  </td>
-                                  <td className="py-1 px-2 text-center text-muted-foreground">
-                                    {ex.weightKg != null ? `${ex.weightKg}kg` : "—"}
-                                  </td>
-                                  <td className="py-1 pl-2 text-center text-muted-foreground">
-                                    {ex.distanceKm != null ? `${ex.distanceKm}km` : "—"}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                      {workout.notes && (
-                        <p className="text-xs text-muted-foreground mt-2 italic">{workout.notes}</p>
-                      )}
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive shrink-0"
-                      onClick={() => deleteWorkout(workout.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
           </div>
         </TabsContent>
       </Tabs>
