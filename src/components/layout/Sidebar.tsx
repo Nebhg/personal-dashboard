@@ -12,6 +12,7 @@ import {
   Briefcase,
   Code2,
   TrendingUp,
+  Wallet,
   Sun,
   Moon,
 } from "lucide-react";
@@ -25,7 +26,8 @@ const navItems = [
   { href: "/calendar",  label: "Calendar",  icon: Calendar },
   { href: "/diet",      label: "Diet",      icon: Utensils },
   { href: "/exercise",  label: "Exercise",  icon: Dumbbell },
-  { href: "/habits",    label: "Habits",    icon: Target },
+  { href: "/habits",       label: "Habits",      icon: Target },
+  { href: "/investments",  label: "Investments", icon: Wallet },
 ];
 
 export function Sidebar() {

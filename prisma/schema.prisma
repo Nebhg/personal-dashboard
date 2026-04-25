@@ -335,6 +335,41 @@ model MacroTopic {
 }
 
 // ─────────────────────────────────────────
+// INVESTMENTS
+// ─────────────────────────────────────────
+
+model InvestmentAccount {
+  id               String              @id @default(cuid())
+  name             String              // "Trading 212 Stocks ISA"
+  broker           String              // "Trading 212"
+  accountType      String              // "ISA_STOCKS" | "INVEST" | "SIPP" | "OTHER"
+  cashBalanceGbp   Float               @default(0)
+  interestRate     Float?              // annual % on uninvested cash, e.g. 3.5
+  isaAllowanceUsed Float?              // GBP used of annual ISA allowance
+  totalReturnGbp   Float?              // actual interest/return earned to date (manual)
+  notes            String?
+  holdings         InvestmentHolding[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+}
+
+model InvestmentHolding {
+  id            String            @id @default(cuid())
+  account       InvestmentAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId     String
+  ticker        String?           // "AMD", "NVDA", "VUSA"
+  name          String            // "Advanced Micro Devices Inc"
+  quantity      Float
+  priceCurrency String            @default("USD") // currency the stock trades in
+  lastPrice     Float?            // last recorded price in priceCurrency
+  valueGbp      Float?            // last recorded total value in GBP
+  costGbp       Float             // total cost basis in GBP
+  notes         String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+}
+
+// ─────────────────────────────────────────
 // WORK FROM HOME DAYS
 // ─────────────────────────────────────────
 
