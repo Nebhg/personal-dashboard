@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { HabitCard } from "@/components/habits/HabitCard";
+import { format, subDays, startOfDay, endOfDay } from "date-fns";
 import { HabitForm } from "@/components/habits/HabitForm";
-import { HabitStreakTimeline } from "@/components/habits/HabitStreakTimeline";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Topbar } from "@/components/ui/topbar";
+import { Panel, PanelHead, PanelTitle, PanelBody } from "@/components/ui/panel";
+import { StatTile } from "@/components/ui/stat-tile";
+import { AtlasBtn } from "@/components/ui/topbar";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Target, LayoutGrid, TrendingUp, Flame, Trophy } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { calculateStreak } from "@/lib/utils/streaks";
 
 interface HabitLog {
@@ -32,159 +32,217 @@ interface Habit {
   logs: HabitLog[];
 }
 
+type CellStatus = "k" | "miss" | "default";
+
+function buildHeatmap(logs: HabitLog[], days = 30): CellStatus[] {
+  const today = startOfDay(new Date());
+  return Array.from({ length: days }, (_, i) => {
+    const day    = subDays(today, days - 1 - i);
+    const dayStr = format(day, "yyyy-MM-dd");
+    const log    = logs.find((l) => format(new Date(l.date), "yyyy-MM-dd") === dayStr);
+    if (!log)      return "default";
+    return log.kept ? "k" : "miss";
+  });
+}
+
 export default function HabitsPage() {
   const [habits, setHabits] = useState<Habit[]>([]);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen]     = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/habits");
     setHabits(await res.json());
   }, []);
 
-  useEffect(() => {
+  useEffect(() => { load(); }, [load]);
+
+  const today = startOfDay(new Date());
+  const todayEnd = endOfDay(new Date());
+
+  const habitStreaks = habits.map((h) => ({
+    ...h,
+    streak:   calculateStreak(h.logs.map((l) => ({ date: new Date(l.date), kept: l.kept }))),
+    todayLog: h.logs.find((l) => {
+      const d = new Date(l.date);
+      return d >= today && d <= todayEnd;
+    }),
+    cells: buildHeatmap(h.logs, 30),
+  }));
+
+  const topStreak    = habitStreaks.length > 0 ? Math.max(...habitStreaks.map((h) => h.streak)) : 0;
+  const keptToday    = habitStreaks.filter((h) => h.todayLog?.kept).length;
+  const topName      = habitStreaks.find((h) => h.streak === topStreak)?.name ?? "—";
+
+  // 30d adherence
+  const totalPossible = habits.length * 30;
+  const totalKept = habits.reduce((acc, h) => {
+    return acc + h.logs.filter((l) => {
+      const d = new Date(l.date);
+      return d >= subDays(today, 30) && l.kept;
+    }).length;
+  }, 0);
+  const adherence = totalPossible > 0 ? Math.round((totalKept / totalPossible) * 100) : 0;
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this habit?")) return;
+    setDeletingId(id);
+    await fetch(`/api/habits/${id}`, { method: "DELETE" });
+    setDeletingId(null);
     load();
-  }, [load]);
+  };
 
-  const quitHabits = habits.filter((h) => h.type === "QUIT");
-  const buildHabits = habits.filter((h) => h.type === "BUILD");
-
-  // Stats for header
-  const streaks = habits.map((h) =>
-    calculateStreak(h.logs.map((l) => ({ date: new Date(l.date), kept: l.kept })))
-  );
-  const bestStreak = streaks.length > 0 ? Math.max(...streaks) : 0;
-  const activeStreaks = streaks.filter((s) => s > 0).length;
+  const handleCheck = async (habit: Habit & { todayLog?: HabitLog }) => {
+    const alreadyKept = habit.todayLog?.kept;
+    await fetch(`/api/habits/${habit.id}/logs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: format(new Date(), "yyyy-MM-dd"), kept: !alreadyKept }),
+    });
+    load();
+  };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Target className="h-6 w-6 text-orange-500" />
-            Habits
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Track what you are quitting and building
-          </p>
+    <>
+      <Topbar
+        title="Habits"
+        crumb={`${habits.length} ACTIVE · 30-DAY VIEW`}
+        actions={
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <AtlasBtn variant="primary">
+                <Plus className="h-[13px] w-[13px]" />
+                New habit
+              </AtlasBtn>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create Habit</DialogTitle>
+              </DialogHeader>
+              <HabitForm onSuccess={() => { setOpen(false); load(); }} />
+            </DialogContent>
+          </Dialog>
+        }
+      />
+
+      <div className="px-8 pt-7 pb-16 max-w-[1400px]">
+        {/* Stats row */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <StatTile label="Active"       num={habits.length} sub={<span>{habits.filter(h => h.type === "BUILD").length} BUILD · {habits.filter(h => h.type === "QUIT").length} QUIT</span>} />
+          <StatTile label="Top streak"   num={topStreak}  unit="days" sub={<span>{topName}</span>} />
+          <StatTile
+            label="Kept today"
+            num={keptToday}
+            unit={`/ ${habits.length}`}
+            sub={<span>{habits.length - keptToday > 0 ? `${habits.length - keptToday} pending` : "all done"}</span>}
+          />
+          <StatTile
+            label="30d adherence"
+            num={adherence}
+            unit="%"
+            delta={adherence > 70 ? "+good" : adherence > 50 ? "avg" : "low"}
+            deltaDir={adherence > 70 ? "up" : adherence > 50 ? "flat" : "down"}
+          />
         </div>
 
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" className="gap-1">
-              <Plus className="h-4 w-4" />
-              New Habit
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create Habit</DialogTitle>
-            </DialogHeader>
-            <HabitForm
-              onSuccess={() => {
-                setOpen(false);
-                load();
-              }}
-            />
-          </DialogContent>
-        </Dialog>
+        {/* Heatmap table */}
+        {habits.length === 0 ? (
+          <Panel>
+            <PanelBody className="flex flex-col items-center py-16">
+              <span className="label mb-3">No habits yet</span>
+              <Dialog open={open} onOpenChange={setOpen}>
+                <DialogTrigger asChild>
+                  <AtlasBtn variant="primary">
+                    <Plus className="h-[13px] w-[13px]" />
+                    Add your first habit
+                  </AtlasBtn>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Create Habit</DialogTitle>
+                  </DialogHeader>
+                  <HabitForm onSuccess={() => { setOpen(false); load(); }} />
+                </DialogContent>
+              </Dialog>
+            </PanelBody>
+          </Panel>
+        ) : (
+          <Panel>
+            <PanelHead>
+              <PanelTitle>All habits · last 30 days</PanelTitle>
+              <span className="label">today →</span>
+            </PanelHead>
+            <div>
+              {habitStreaks
+                .sort((a, b) => b.streak - a.streak)
+                .map((h) => (
+                  <div
+                    key={h.id}
+                    className="flex items-center gap-4 px-4 py-[14px] border-b border-border last:border-0 hover:bg-muted transition-colors group"
+                    style={{ gridTemplateColumns: "1fr 360px 80px" }}
+                  >
+                    {/* Name + tag */}
+                    <div className="min-w-0 w-[180px] shrink-0">
+                      <div
+                        className="text-[13px] font-medium cursor-pointer"
+                        onClick={() => handleCheck(h)}
+                      >
+                        {h.name}
+                      </div>
+                      <div
+                        className="mono text-[9px] mt-0.5 uppercase tracking-[0.1em]"
+                        style={{ color: "var(--fg-3)" }}
+                      >
+                        {h.type} · daily
+                      </div>
+                    </div>
+
+                    {/* Heatmap cells */}
+                    <div
+                      className="flex-1 grid gap-[2px]"
+                      style={{ gridTemplateColumns: "repeat(30, 1fr)" }}
+                    >
+                      {h.cells.map((status, i) => (
+                        <div
+                          key={i}
+                          className="rounded-[2px]"
+                          style={{
+                            height: 14,
+                            background:
+                              status === "k"
+                                ? "var(--primary)"
+                                : status === "miss"
+                                ? "oklch(0.30 0.04 25)"
+                                : "var(--muted)",
+                          }}
+                        />
+                      ))}
+                    </div>
+
+                    {/* Streak + actions */}
+                    <div className="flex items-center gap-2 shrink-0 w-[80px] justify-end">
+                      <span
+                        className="mono text-[14px] tabular-nums"
+                        style={{ color: h.streak > 0 ? "var(--foreground)" : "var(--fg-3)" }}
+                      >
+                        {h.streak}
+                        <span className="mono text-[9px] ml-[3px]" style={{ color: "var(--fg-3)" }}>d</span>
+                      </span>
+                      <button
+                        onClick={() => handleDelete(h.id)}
+                        disabled={deletingId === h.id}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/20"
+                        style={{ color: "var(--fg-3)" }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </Panel>
+        )}
       </div>
-
-      {habits.length === 0 && (
-        <div className="text-center py-16 text-muted-foreground">
-          <Target className="h-12 w-12 mx-auto mb-3 opacity-20" />
-          <p className="font-medium">No habits yet</p>
-          <p className="text-sm mt-1">Add a habit to start tracking your streaks</p>
-        </div>
-      )}
-
-      {habits.length > 0 && (
-        <>
-          {/* Stats row */}
-          <div className="grid grid-cols-3 gap-3 mb-6">
-            <Card>
-              <CardContent className="p-3 flex items-center gap-2">
-                <Target className="h-4 w-4 text-muted-foreground shrink-0" />
-                <div>
-                  <p className="text-lg font-bold leading-none">{habits.length}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Total habits</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-3 flex items-center gap-2">
-                <Flame className="h-4 w-4 text-orange-500 shrink-0" />
-                <div>
-                  <p className="text-lg font-bold leading-none">{activeStreaks}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Active streaks</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-3 flex items-center gap-2">
-                <Trophy className="h-4 w-4 text-yellow-500 shrink-0" />
-                <div>
-                  <p className="text-lg font-bold leading-none">{bestStreak}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Best streak</p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <Tabs defaultValue="grid">
-            <TabsList className="mb-4">
-              <TabsTrigger value="grid" className="gap-1.5">
-                <LayoutGrid className="h-3.5 w-3.5" />
-                Grid
-              </TabsTrigger>
-              <TabsTrigger value="streaks" className="gap-1.5">
-                <TrendingUp className="h-3.5 w-3.5" />
-                Streaks
-              </TabsTrigger>
-            </TabsList>
-
-            {/* ── GRID TAB ─── */}
-            <TabsContent value="grid">
-              {quitHabits.length > 0 && (
-                <section className="mb-6">
-                  <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-                    Quitting
-                  </h2>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {quitHabits.map((habit) => (
-                      <HabitCard key={habit.id} habit={habit} onUpdate={load} />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {buildHabits.length > 0 && (
-                <section>
-                  <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-                    Building
-                  </h2>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {buildHabits.map((habit) => (
-                      <HabitCard key={habit.id} habit={habit} onUpdate={load} />
-                    ))}
-                  </div>
-                </section>
-              )}
-            </TabsContent>
-
-            {/* ── STREAKS TAB ─── */}
-            <TabsContent value="streaks">
-              <Card>
-                <CardContent className="p-4">
-                  <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-4">
-                    Last 30 days
-                  </h2>
-                  <HabitStreakTimeline habits={habits} />
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
-        </>
-      )}
-    </div>
+    </>
   );
 }

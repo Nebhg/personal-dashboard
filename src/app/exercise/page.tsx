@@ -15,6 +15,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Plus, Dumbbell, Trash2, ClipboardList, CalendarDays, Pencil } from "lucide-react";
+import { Topbar, AtlasBtn } from "@/components/ui/topbar";
+import { StatTile } from "@/components/ui/stat-tile";
 
 interface PlanExercise {
   id: string;
@@ -79,19 +81,59 @@ export default function ExercisePage() {
     return acc + days.length;
   }, 0);
 
+  const totalMin = sessions.reduce((s, w) => {
+    const found = (plans as WorkoutPlan[]).find((p) => p.name === w.name);
+    return s;
+  }, 0);
+
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Dumbbell className="h-6 w-6 text-blue-400" />
-            Exercise
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {sessions.length} sessions logged · {sessionsPerWeek}×/week scheduled
-          </p>
+    <>
+      <Topbar
+        title="Exercise"
+        crumb={`${sessions.length} SESSIONS LOGGED`}
+        actions={
+          <Dialog open={newPlanOpen} onOpenChange={setNewPlanOpen}>
+            <DialogTrigger asChild>
+              <AtlasBtn variant="primary">
+                <Plus className="h-[13px] w-[13px]" />
+                New workout
+              </AtlasBtn>
+            </DialogTrigger>
+            <DialogContent className="w-[70vw] !max-w-none max-h-[70vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Create Workout</DialogTitle>
+              </DialogHeader>
+              <WorkoutPlanForm onSuccess={() => { setNewPlanOpen(false); loadPlans(); }} />
+            </DialogContent>
+          </Dialog>
+        }
+      />
+
+      <div className="px-8 pt-7 pb-16">
+        {/* Stat tiles */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <StatTile
+            label="Sessions · total"
+            num={sessions.length}
+            sub={<span>all time</span>}
+          />
+          <StatTile
+            label="Plans"
+            num={plans.length}
+            sub={<span>{sessionsPerWeek}×/week scheduled</span>}
+          />
+          <StatTile
+            label="Exercises"
+            num={plans.reduce((s, p) => s + p.exercises.length, 0)}
+            sub={<span>across all plans</span>}
+          />
+          <StatTile
+            label="Schedule"
+            num={sessionsPerWeek}
+            unit="×/wk"
+            sub={<span>{plans.length} plans active</span>}
+          />
         </div>
-      </div>
 
       <Tabs defaultValue="schedule">
         <TabsList className="mb-4">
@@ -116,22 +158,6 @@ export default function ExercisePage() {
 
         {/* ── WORKOUTS TAB ─── */}
         <TabsContent value="plans">
-          <div className="flex justify-end mb-3">
-            <Dialog open={newPlanOpen} onOpenChange={setNewPlanOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" className="gap-1">
-                  <Plus className="h-4 w-4" />
-                  New Workout
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="w-[70vw] !max-w-none max-h-[70vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Create Workout</DialogTitle>
-                </DialogHeader>
-                <WorkoutPlanForm onSuccess={() => { setNewPlanOpen(false); loadPlans(); }} />
-              </DialogContent>
-            </Dialog>
-          </div>
 
           {/* Edit dialog */}
           <Dialog open={editPlanOpen} onOpenChange={setEditPlanOpen}>
@@ -213,6 +239,7 @@ export default function ExercisePage() {
           </div>
         </TabsContent>
       </Tabs>
-    </div>
+      </div>
+    </>
   );
 }

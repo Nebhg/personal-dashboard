@@ -22,6 +22,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { TrendingUp, Plus, Trash2 } from "lucide-react";
+import { Topbar, AtlasBtn } from "@/components/ui/topbar";
+import { StatTile } from "@/components/ui/stat-tile";
+import { Panel, PanelHead, PanelTitle } from "@/components/ui/panel";
 
 const TRACKS = [
   { value: "1", label: "Track 1 — Options Pricing" },
@@ -194,70 +197,74 @@ export default function MacroPage() {
   const appCount   = topics.filter(t => t.level === "application").length;
   const shakyCount = topics.filter(t => t.level === "shaky").length;
 
-  return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <TrendingUp className="h-6 w-6" />
-            Macro Learning
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {topics.length} topics covered
-            {appCount > 0 && ` · ${appCount} at application level`}
-            {shakyCount > 0 && ` · ${shakyCount} shaky`}
-          </p>
-        </div>
-        <LogTopicDialog onSave={load} />
-      </div>
+  const recallCount = topics.filter(t => t.level === "recall").length;
+  const tracksActive = new Set(topics.map(t => t.track).filter(Boolean)).size;
 
-      {loading ? (
-        <p className="text-muted-foreground text-sm">Loading…</p>
-      ) : topics.length === 0 ? (
-        <Card>
-          <CardContent className="p-8 text-center text-muted-foreground">
-            <TrendingUp className="h-8 w-8 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">No topics logged yet.</p>
-            <p className="text-xs mt-1">Log a topic after each learning session.</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          {[1, 2, 3, 4, 5].map(trackNum => {
-            const trackTopics = byTrack.get(trackNum) ?? [];
-            if (trackTopics.length === 0) return null;
-            return (
-              <Card key={trackNum}>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">
-                    Track {trackNum} — {TRACK_NAMES[trackNum]}
-                    <span className="ml-2 text-xs font-normal text-muted-foreground">
-                      {trackTopics.length} topics
-                    </span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  {trackTopics.map(t => (
+  return (
+    <>
+      <Topbar
+        title="Macro"
+        crumb={`${topics.length} TOPICS · ${tracksActive} TRACKS`}
+        actions={<LogTopicDialog onSave={load} />}
+      />
+
+      <div className="px-8 pt-7 pb-16 max-w-4xl">
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <StatTile label="Topics" num={topics.length} sub={<span>all time</span>} />
+          <StatTile label="Application" num={appCount} sub={<span>highest level</span>} />
+          <StatTile label="Recall" num={recallCount} sub={<span>solid knowledge</span>} />
+          <StatTile
+            label="Shaky"
+            num={shakyCount}
+            sub={<span>{shakyCount > 0 ? "needs review" : "none flagged"}</span>}
+            delta={shakyCount > 0 ? `${shakyCount} to review` : undefined}
+            deltaDir="down"
+          />
+        </div>
+
+        {loading ? (
+          <p className="text-muted-foreground text-sm">Loading…</p>
+        ) : topics.length === 0 ? (
+          <div className="text-center py-16 text-muted-foreground">
+            <TrendingUp className="h-12 w-12 mx-auto mb-3 opacity-20" />
+            <p className="font-medium">No topics logged yet</p>
+            <p className="text-sm mt-1">Log a topic after each learning session</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {[1, 2, 3, 4, 5].map(trackNum => {
+              const trackTopics = byTrack.get(trackNum) ?? [];
+              if (trackTopics.length === 0) return null;
+              return (
+                <Panel key={trackNum}>
+                  <PanelHead>
+                    <PanelTitle>Track {trackNum} — {TRACK_NAMES[trackNum]}</PanelTitle>
+                    <span className="label">{trackTopics.length} topics</span>
+                  </PanelHead>
+                  <div className="px-4 pb-2 pt-1">
+                    {trackTopics.map(t => (
+                      <TopicCard key={t.id} topic={t} onDelete={load} />
+                    ))}
+                  </div>
+                </Panel>
+              );
+            })}
+            {(byTrack.get(null) ?? []).length > 0 && (
+              <Panel>
+                <PanelHead>
+                  <PanelTitle>Untracked</PanelTitle>
+                  <span className="label">{(byTrack.get(null) ?? []).length} topics</span>
+                </PanelHead>
+                <div className="px-4 pb-2 pt-1">
+                  {(byTrack.get(null) ?? []).map(t => (
                     <TopicCard key={t.id} topic={t} onDelete={load} />
                   ))}
-                </CardContent>
-              </Card>
-            );
-          })}
-          {(byTrack.get(null) ?? []).length > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-muted-foreground">Untracked</CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
-                {(byTrack.get(null) ?? []).map(t => (
-                  <TopicCard key={t.id} topic={t} onDelete={load} />
-                ))}
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
-    </div>
+                </div>
+              </Panel>
+            )}
+          </div>
+        )}
+      </div>
+    </>
   );
 }

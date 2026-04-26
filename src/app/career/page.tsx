@@ -20,9 +20,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Briefcase, Plus, ChevronDown, ChevronRight, AlertCircle } from "lucide-react";
+import { Plus, ChevronDown, ChevronRight, AlertCircle } from "lucide-react";
 import { ApplicationStage, STAGE_LABELS, STAGE_COLORS } from "@/types";
 import { cn } from "@/lib/utils";
+import { Topbar, AtlasBtn } from "@/components/ui/topbar";
+import { StatTile } from "@/components/ui/stat-tile";
 
 type Application = {
   id: string;
@@ -381,69 +383,78 @@ export default function CareerPage() {
     setApps((prev) => [app, ...prev]);
   }
 
+  const offerCount = active.filter((a) => a.stage === "OFFER").length;
+
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Briefcase className="h-6 w-6 text-blue-400" />
-            Career Pipeline
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {active.length} active · {prepCount > 0 ? `${prepCount} need prep · ` : ""}{closed.length} closed
-          </p>
+    <>
+      <Topbar
+        title="Career"
+        crumb={`${active.length} ACTIVE · ${closed.length} CLOSED`}
+        actions={<AddApplicationDialog onAdd={handleAdd} />}
+      />
+
+      <div className="px-8 pt-7 pb-16 max-w-4xl">
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <StatTile label="Active" num={active.length} sub={<span>{ACTIVE_STAGES.length} stages tracked</span>} />
+          <StatTile label="Offers" num={offerCount} sub={<span>{offerCount > 0 ? "in hand" : "none yet"}</span>} />
+          <StatTile
+            label="Need prep"
+            num={prepCount}
+            sub={<span>{prepCount > 0 ? "action required" : "all clear"}</span>}
+            delta={prepCount > 0 ? `${prepCount} pending` : undefined}
+            deltaDir="down"
+          />
+          <StatTile label="Closed" num={closed.length} sub={<span>rejected + ghosted</span>} />
         </div>
-        <AddApplicationDialog onAdd={handleAdd} />
+
+        {loading ? (
+          <p className="text-muted-foreground text-sm">Loading...</p>
+        ) : (
+          <>
+            {active.length === 0 ? (
+              <div className="text-center py-16 text-muted-foreground">
+                <p className="font-medium">No active applications</p>
+                <p className="text-sm mt-1">Add one to start tracking</p>
+              </div>
+            ) : (
+              <div className="space-y-3 mb-6">
+                {active.map((app) => (
+                  <ApplicationCard
+                    key={app.id}
+                    app={app}
+                    onUpdate={handleUpdate}
+                    onDelete={handleDelete}
+                  />
+                ))}
+              </div>
+            )}
+
+            {closed.length > 0 && (
+              <div>
+                <button
+                  onClick={() => setClosedOpen(!closedOpen)}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3"
+                >
+                  {closedOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  Closed / Inactive ({closed.length})
+                </button>
+                {closedOpen && (
+                  <div className="space-y-3 opacity-60">
+                    {closed.map((app) => (
+                      <ApplicationCard
+                        key={app.id}
+                        app={app}
+                        onUpdate={handleUpdate}
+                        onDelete={handleDelete}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
       </div>
-
-      {loading ? (
-        <p className="text-muted-foreground text-sm">Loading...</p>
-      ) : (
-        <>
-          {active.length === 0 ? (
-            <Card>
-              <CardContent className="p-8 text-center text-muted-foreground text-sm">
-                No active applications. Add one to get started.
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-3 mb-6">
-              {active.map((app) => (
-                <ApplicationCard
-                  key={app.id}
-                  app={app}
-                  onUpdate={handleUpdate}
-                  onDelete={handleDelete}
-                />
-              ))}
-            </div>
-          )}
-
-          {closed.length > 0 && (
-            <div>
-              <button
-                onClick={() => setClosedOpen(!closedOpen)}
-                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3"
-              >
-                {closedOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                Closed / Inactive ({closed.length})
-              </button>
-              {closedOpen && (
-                <div className="space-y-3 opacity-60">
-                  {closed.map((app) => (
-                    <ApplicationCard
-                      key={app.id}
-                      app={app}
-                      onUpdate={handleUpdate}
-                      onDelete={handleDelete}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
-    </div>
+    </>
   );
 }

@@ -43,11 +43,14 @@ export type CalendarEventDTO = {
 };
 
 export const AREA_COLORS: Record<string, string> = {
-  DIET: "#22c55e",
-  EXERCISE: "#3b82f6",
-  LEARNING: "#a855f7",
-  HABITS: "#f97316",
-  SCHEDULE: "#6366f1",
+  WORK:     "oklch(0.78 0.15 285)",
+  EXERCISE: "oklch(0.78 0.13 165)",
+  DIET:     "oklch(0.80 0.14 145)",
+  LEARNING: "oklch(0.78 0.14 280)",
+  PERSONAL: "oklch(0.80 0.13 25)",
+  HABITS:   "oklch(0.82 0.13 75)",
+  SLEEP:    "oklch(0.65 0.04 250)",
+  SCHEDULE: "oklch(0.78 0.15 285)",
 };
 
 export const AREA_LABELS: Record<string, string> = {

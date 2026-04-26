@@ -32,6 +32,8 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { Plus, BookOpen, Clock, Trash2, ExternalLink } from "lucide-react";
 import { format } from "date-fns";
+import { Topbar, AtlasBtn } from "@/components/ui/topbar";
+import { StatTile } from "@/components/ui/stat-tile";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -254,44 +256,52 @@ export default function LearningPage() {
   }
 
   const totalMin = sessions.reduce((s, sess) => s + sess.durationMin, 0);
+  const totalHours = Math.floor(totalMin / 60);
+  const booksReading = books.filter((b) => b.status === "reading").length;
+  const booksFinished = books.filter((b) => b.status === "finished").length;
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <BookOpen className="h-6 w-6 text-purple-500" />
-            Learning
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {sessions.length} sessions · {Math.floor(totalMin / 60)}h {totalMin % 60}min total
-          </p>
+    <>
+      <Topbar
+        title="Learning"
+        crumb={`${sessions.length} SESSIONS · ${totalHours}H LOGGED`}
+        actions={
+          <div className="flex gap-2">
+            <Dialog open={sessionOpen} onOpenChange={setSessionOpen}>
+              <DialogTrigger asChild>
+                <AtlasBtn variant="default">
+                  <Plus className="h-[13px] w-[13px]" />
+                  Log session
+                </AtlasBtn>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>Log Learning Session</DialogTitle></DialogHeader>
+                <SessionForm onSuccess={() => { setSessionOpen(false); load(); }} />
+              </DialogContent>
+            </Dialog>
+            <Dialog open={bookOpen} onOpenChange={setBookOpen}>
+              <DialogTrigger asChild>
+                <AtlasBtn variant="primary">
+                  <Plus className="h-[13px] w-[13px]" />
+                  Add book
+                </AtlasBtn>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>Add Book</DialogTitle></DialogHeader>
+                <BookFormComponent onSuccess={() => { setBookOpen(false); load(); }} />
+              </DialogContent>
+            </Dialog>
+          </div>
+        }
+      />
+
+      <div className="px-8 pt-7 pb-16">
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <StatTile label="Sessions" num={sessions.length} sub={<span>all time</span>} />
+          <StatTile label="Hours logged" num={totalHours} unit="h" sub={<span>{totalMin % 60}min remainder</span>} />
+          <StatTile label="Reading" num={booksReading} sub={<span>{books.length} books total</span>} />
+          <StatTile label="Finished" num={booksFinished} sub={<span>books completed</span>} />
         </div>
-        <div className="flex gap-2">
-          <Dialog open={sessionOpen} onOpenChange={setSessionOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" variant="outline" className="gap-1">
-                <Plus className="h-4 w-4" /> Log Session
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>Log Learning Session</DialogTitle></DialogHeader>
-              <SessionForm onSuccess={() => { setSessionOpen(false); load(); }} />
-            </DialogContent>
-          </Dialog>
-          <Dialog open={bookOpen} onOpenChange={setBookOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" className="gap-1">
-                <Plus className="h-4 w-4" /> Add Book
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>Add Book</DialogTitle></DialogHeader>
-              <BookFormComponent onSuccess={() => { setBookOpen(false); load(); }} />
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
 
       <Tabs defaultValue="sessions">
         <TabsList className="mb-4">
@@ -397,6 +407,7 @@ export default function LearningPage() {
           </div>
         </TabsContent>
       </Tabs>
-    </div>
+      </div>
+    </>
   );
 }

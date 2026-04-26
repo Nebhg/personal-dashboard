@@ -22,6 +22,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Code2, Plus, Trash2, TrendingUp } from "lucide-react";
+import { Topbar, AtlasBtn } from "@/components/ui/topbar";
+import { StatTile } from "@/components/ui/stat-tile";
+import { Panel, PanelHead, PanelTitle, PanelBody } from "@/components/ui/panel";
 
 const PATTERNS = [
   "Two Pointers",
@@ -253,87 +256,66 @@ export default function LeetCodePage() {
     ? (problems.reduce((s, p) => s + (p.confidence ?? 0), 0) / problems.filter(p => p.confidence).length).toFixed(1)
     : null;
 
+  const thisWeek = problems.filter((p) => {
+    const d = new Date(p.date);
+    const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+    return d >= weekAgo;
+  }).length;
+
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Code2 className="h-6 w-6" />
-            LeetCode
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {problems.length} problems logged
-          </p>
+    <>
+      <Topbar
+        title="LeetCode"
+        crumb={`${problems.length} PROBLEMS LOGGED`}
+        actions={<LogProblemDialog onSave={load} />}
+      />
+
+      <div className="px-8 pt-7 pb-16 max-w-4xl">
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <StatTile label="Problems" num={problems.length} sub={<span>all time</span>} />
+          <StatTile label="This week" num={thisWeek} sub={<span>last 7 days</span>} />
+          <StatTile label="Avg confidence" num={avgConf ?? "—"} unit={avgConf ? "/10" : ""} sub={<span>self-rated</span>} />
+          <StatTile label="Patterns" num={patterns.length} sub={<span>distinct covered</span>} />
         </div>
-        <LogProblemDialog onSave={load} />
-      </div>
 
-      {/* Stats row */}
-      {problems.length > 0 && (
-        <div className="grid grid-cols-3 gap-3 mb-6">
-          <Card>
-            <CardContent className="p-3 text-center">
-              <p className="text-2xl font-bold">{problems.length}</p>
-              <p className="text-xs text-muted-foreground">problems</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-3 text-center">
-              <p className="text-2xl font-bold">{avgConf ?? "—"}</p>
-              <p className="text-xs text-muted-foreground">avg confidence</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-3 text-center">
-              <p className="text-2xl font-bold">{patterns.length}</p>
-              <p className="text-xs text-muted-foreground">patterns</p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+        {/* Patterns covered */}
+        {patterns.length > 0 && (
+          <Panel className="mb-6">
+            <PanelHead>
+              <PanelTitle>Patterns covered</PanelTitle>
+              <span className="label">{patterns.length} total</span>
+            </PanelHead>
+            <PanelBody className="flex flex-wrap gap-2">
+              {patterns.map(p => (
+                <span key={p!} className="label px-2 py-1 rounded-[4px]" style={{ background: "var(--muted)", color: "var(--fg-2)" }}>{p}</span>
+              ))}
+            </PanelBody>
+          </Panel>
+        )}
 
-      {/* Patterns covered */}
-      {patterns.length > 0 && (
-        <Card className="mb-6">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <TrendingUp className="h-4 w-4" />
-              Patterns covered
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            {patterns.map(p => (
-              <Badge key={p!} variant="secondary">{p}</Badge>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Problems by date */}
-      {loading ? (
-        <p className="text-muted-foreground text-sm">Loading…</p>
-      ) : problems.length === 0 ? (
-        <Card>
-          <CardContent className="p-8 text-center text-muted-foreground">
-            <Code2 className="h-8 w-8 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">No problems logged yet.</p>
-            <p className="text-xs mt-1">Hit "Log Problem" after each session.</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-6">
-          {[...byDate.entries()].map(([date, dayProblems]) => (
-            <div key={date}>
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">{date}</h3>
-              <div className="space-y-2">
-                {dayProblems.map(p => (
-                  <ProblemCard key={p.id} problem={p} onDelete={load} />
-                ))}
+        {loading ? (
+          <p className="text-muted-foreground text-sm">Loading…</p>
+        ) : problems.length === 0 ? (
+          <div className="text-center py-16 text-muted-foreground">
+            <Code2 className="h-12 w-12 mx-auto mb-3 opacity-20" />
+            <p className="font-medium">No problems logged yet</p>
+            <p className="text-sm mt-1">Hit "Log Problem" after each session</p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {[...byDate.entries()].map(([date, dayProblems]) => (
+              <div key={date}>
+                <p className="label mb-2" style={{ color: "var(--fg-3)" }}>{date}</p>
+                <div className="space-y-2">
+                  {dayProblems.map(p => (
+                    <ProblemCard key={p.id} problem={p} onDelete={load} />
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   );
 }

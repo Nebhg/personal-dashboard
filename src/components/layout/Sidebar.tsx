@@ -13,81 +13,164 @@ import {
   Code2,
   TrendingUp,
   Wallet,
-  Sun,
-  Moon,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/career",    label: "Career",    icon: Briefcase },
-  { href: "/leetcode",  label: "LeetCode",  icon: Code2 },
-  { href: "/macro",     label: "Macro",     icon: TrendingUp },
-  { href: "/calendar",  label: "Calendar",  icon: Calendar },
-  { href: "/diet",      label: "Diet",      icon: Utensils },
-  { href: "/exercise",  label: "Exercise",  icon: Dumbbell },
-  { href: "/habits",       label: "Habits",      icon: Target },
-  { href: "/investments",  label: "Investments", icon: Wallet },
+const WORKSPACE = [
+  { href: "/dashboard",   label: "Dashboard", icon: LayoutDashboard },
+  { href: "/calendar",    label: "Calendar",  icon: Calendar },
+  { href: "/habits",      label: "Habits",    icon: Target },
+  { href: "/diet",        label: "Diet",      icon: Utensils },
+  { href: "/exercise",    label: "Exercise",  icon: Dumbbell },
 ];
+
+const TRACKING = [
+  { href: "/career",      label: "Career",      icon: Briefcase },
+  { href: "/leetcode",    label: "LeetCode",    icon: Code2 },
+  { href: "/macro",       label: "Macro",       icon: TrendingUp },
+  { href: "/investments", label: "Investments", icon: Wallet },
+  { href: "/learning",    label: "Learning",    icon: BookOpen },
+];
+
+function NavItem({
+  href,
+  label,
+  icon: Icon,
+  count,
+  active,
+}: {
+  href: string;
+  label: string;
+  icon: React.ElementType;
+  count?: number;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "relative flex items-center gap-[10px] px-3 py-[7px] text-[13px] rounded-[4px] transition-colors no-underline",
+        active
+          ? "bg-[var(--sidebar-accent)] text-foreground"
+          : "text-[var(--fg-2,oklch(0.78_0.01_240))] hover:bg-[var(--sidebar-accent)] hover:text-foreground"
+      )}
+    >
+      {active && (
+        <span
+          className="absolute left-0 top-2 bottom-2 w-[2px] rounded-[1px] bg-primary"
+          aria-hidden
+        />
+      )}
+      <Icon
+        className={cn(
+          "shrink-0",
+          active ? "text-primary" : "text-[var(--fg-3,oklch(0.58_0.01_240))]"
+        )}
+        style={{ width: 14, height: 14 }}
+      />
+      <span className="flex-1 min-w-0">{label}</span>
+      {count != null && (
+        <span className="mono text-[10px] text-[var(--fg-3,oklch(0.58_0.01_240))]">
+          {String(count).padStart(2, "0")}
+        </span>
+      )}
+    </Link>
+  );
+}
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [isDark, setIsDark] = useState(true);
+  const [time, setTime] = useState("");
 
   useEffect(() => {
-    const stored = localStorage.getItem("theme");
-    const dark = stored !== "light";
-    setIsDark(dark);
-    document.documentElement.classList.toggle("dark", dark);
+    const tick = () => {
+      setTime(new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }));
+    };
+    tick();
+    const id = setInterval(tick, 10_000);
+    return () => clearInterval(id);
   }, []);
 
-  function toggleTheme() {
-    const next = !isDark;
-    setIsDark(next);
-    document.documentElement.classList.toggle("dark", next);
-    localStorage.setItem("theme", next ? "dark" : "light");
-  }
+  const isActive = (href: string) =>
+    pathname === href || pathname.startsWith(href + "/");
 
   return (
-    <aside className="fixed left-0 top-0 h-full w-56 border-r bg-sidebar flex flex-col z-10">
-      <div className="p-5 border-b">
-        <h1 className="font-bold text-lg tracking-tight">My Dashboard</h1>
-        <p className="text-xs text-muted-foreground mt-0.5">Lifestyle tracker</p>
+    <aside
+      className="fixed left-0 top-0 h-full w-[220px] flex flex-col z-20"
+      style={{ borderRight: "1px solid var(--hairline, oklch(1 0 0 / 0.07))", background: "var(--sidebar)" }}
+    >
+      {/* Brand */}
+      <div
+        className="px-6 pb-6 pt-7"
+        style={{ borderBottom: "1px solid var(--hairline, oklch(1 0 0 / 0.07))" }}
+      >
+        <div className="flex items-center gap-[10px]">
+          {/* Glyph: half-fill diagonal + inset border */}
+          <div
+            className="relative shrink-0 rounded-[3px]"
+            style={{
+              width: 22,
+              height: 22,
+              background:
+                "linear-gradient(135deg, var(--primary) 0 50%, var(--muted) 50% 100%)",
+            }}
+          >
+            <span
+              className="absolute rounded-[1px]"
+              style={{
+                inset: 4,
+                border: "1px solid var(--background)",
+              }}
+            />
+          </div>
+          <div>
+            <div className="text-[13px] font-semibold tracking-[-0.01em] leading-none">Atlas</div>
+            <div
+              className="mono text-[10px] tracking-[0.1em] uppercase mt-1 leading-none"
+              style={{ color: "var(--fg-3, oklch(0.58 0.01 240))" }}
+            >
+              v2.4 · personal
+            </div>
+          </div>
+        </div>
       </div>
 
-      <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-        {navItems.map(({ href, label, icon: Icon }) => (
-          <Link
-            key={href}
-            href={href}
-            className={cn(
-              "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-              pathname === href || pathname.startsWith(href + "/")
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            )}
-          >
-            <Icon className="h-4 w-4 shrink-0" />
-            {label}
-          </Link>
-        ))}
+      {/* Nav */}
+      <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-4">
+        <div>
+          <div className="label px-3 pb-1.5">Workspace</div>
+          <div className="space-y-px">
+            {WORKSPACE.map((item) => (
+              <NavItem key={item.href} {...item} active={isActive(item.href)} />
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="label px-3 pb-1.5">Tracking</div>
+          <div className="space-y-px">
+            {TRACKING.map((item) => (
+              <NavItem key={item.href} {...item} active={isActive(item.href)} />
+            ))}
+          </div>
+        </div>
       </nav>
 
-      <div className="p-3 border-t space-y-2">
-        <button
-          onClick={toggleTheme}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-        >
-          {isDark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-          {isDark ? "Light mode" : "Dark mode"}
-        </button>
-        <p className="text-xs text-muted-foreground text-center">
-          {new Date().toLocaleDateString("en-US", {
-            weekday: "long",
-            month: "short",
-            day: "numeric",
-          })}
-        </p>
+      {/* Footer */}
+      <div
+        className="mx-3 pt-4 pb-4 space-y-0"
+        style={{ borderTop: "1px solid var(--hairline, oklch(1 0 0 / 0.07))" }}
+      >
+        <div className="flex items-center justify-between px-3 py-2">
+          <span className="label" style={{ fontSize: 9 }}>Local time</span>
+          <span className="mono text-[11px]" style={{ color: "var(--fg-2, oklch(0.78 0.01 240))" }}>
+            {time}
+          </span>
+        </div>
+        <div className="flex items-center justify-between px-3 py-2">
+          <span className="label" style={{ fontSize: 9 }}>Sync</span>
+          <span className="mono text-[11px] text-primary">● live</span>
+        </div>
       </div>
     </aside>
   );

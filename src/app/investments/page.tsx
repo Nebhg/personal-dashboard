@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/select";
 import { RefreshCw, Save, Plus, Pencil, Trash2, ChevronDown, ChevronRight, Wallet, Wifi, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Topbar, AtlasBtn } from "@/components/ui/topbar";
+import { StatTile } from "@/components/ui/stat-tile";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -687,130 +689,109 @@ export default function InvestmentsPage() {
     );
   }
 
+  const liveStatusCrumb = live
+    ? `LIVE · ${new Date(live.fetchedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`
+    : `${accounts.length} ACCOUNTS · ${allHoldings.length} HOLDINGS`;
+
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Wallet className="h-6 w-6 text-emerald-400" />
-            Investments
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {accounts.length} account{accounts.length !== 1 ? "s" : ""} · {allHoldings.length} holding{allHoldings.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {live && (
-            <button
-              onClick={saveLivePrices}
-              disabled={saving}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-border hover:bg-accent transition-colors text-muted-foreground hover:text-foreground disabled:opacity-50"
-            >
-              <Save className="h-3.5 w-3.5" />
-              {saving ? "Saving…" : "Save prices"}
-            </button>
-          )}
-          <button
-            onClick={fetchLivePrices}
-            disabled={liveLoading}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-border hover:bg-accent transition-colors text-muted-foreground hover:text-foreground disabled:opacity-50"
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", liveLoading && "animate-spin")} />
-            {liveLoading ? "Fetching…" : "Refresh prices"}
-          </button>
-          <AddAccountDialog onAdd={handleAddAccount} />
-        </div>
-      </div>
+    <>
+      <Topbar
+        title="Investments"
+        crumb={liveStatusCrumb}
+        actions={
+          <div className="flex items-center gap-2">
+            {live && (
+              <AtlasBtn variant="default" onClick={saveLivePrices} disabled={saving}>
+                <Save className="h-[13px] w-[13px]" />
+                {saving ? "Saving…" : "Save prices"}
+              </AtlasBtn>
+            )}
+            <AtlasBtn variant="default" onClick={fetchLivePrices} disabled={liveLoading}>
+              <RefreshCw className={cn("h-[13px] w-[13px]", liveLoading && "animate-spin")} />
+              {liveLoading ? "Fetching…" : "Refresh"}
+            </AtlasBtn>
+            <AddAccountDialog onAdd={handleAddAccount} />
+          </div>
+        }
+      />
 
-      {/* Live price status bar */}
-      <div className="mb-5">
-        {liveLoading && (
-          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-            <RefreshCw className="h-3 w-3 animate-spin" /> Fetching live prices from Yahoo Finance…
-          </p>
+      <div className="px-8 pt-7 pb-16 max-w-5xl">
+        {/* Live price status */}
+        {(liveLoading || liveError) && (
+          <div className="mb-4">
+            {liveLoading && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <RefreshCw className="h-3 w-3 animate-spin" /> Fetching live prices from Yahoo Finance…
+              </p>
+            )}
+            {!liveLoading && liveError && (
+              <p className="text-xs text-red-400 flex items-center gap-1.5">
+                <WifiOff className="h-3 w-3" /> Could not fetch live prices: {liveError}
+              </p>
+            )}
+          </div>
         )}
+
+        {/* Stat tiles */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <StatTile
+            label="Total portfolio"
+            num={`£${fmt(totalPortfolio)}`}
+            sub={<span>{accounts.length} accounts</span>}
+          />
+          <StatTile
+            label="Holdings P&L"
+            num={`${totalPl >= 0 ? "+" : ""}£${fmt(totalPl)}`}
+            sub={<span className={plColor(totalPct)}>{totalPct >= 0 ? "+" : ""}{totalPct.toFixed(2)}%</span>}
+            delta={totalPl >= 0 ? `+${totalPct.toFixed(1)}%` : `${totalPct.toFixed(1)}%`}
+            deltaDir={totalPl >= 0 ? "up" : "down"}
+          />
+          <StatTile
+            label="Cash uninvested"
+            num={`£${fmt(totalCash)}`}
+            sub={annualInterestTotal > 0 ? <span>~£{fmt(annualInterestTotal)} p.a.</span> : <span>no interest</span>}
+          />
+          <StatTile
+            label="Cost basis"
+            num={`£${fmt(totalCost)}`}
+            sub={<span>holdings only</span>}
+          />
+        </div>
+
+        {/* Live prices badge */}
         {!liveLoading && live && (
-          <p className="text-xs text-emerald-500 flex items-center gap-1.5">
+          <p className="text-xs flex items-center gap-1.5 mb-4" style={{ color: "oklch(0.72 0.16 165)" }}>
             <Wifi className="h-3 w-3" />
-            Live prices as of {new Date(live.fetchedAt).toLocaleTimeString("en-GB")}
-            {live.gbpUsd && <span className="text-muted-foreground ml-2">GBP/USD {live.gbpUsd.toFixed(4)}</span>}
+            Live as of {new Date(live.fetchedAt).toLocaleTimeString("en-GB")}
+            {live.gbpUsd && <span className="ml-2" style={{ color: "var(--fg-3)" }}>GBP/USD {live.gbpUsd.toFixed(4)}</span>}
           </p>
         )}
-        {!liveLoading && liveError && (
-          <p className="text-xs text-red-400 flex items-center gap-1.5">
-            <WifiOff className="h-3 w-3" /> Could not fetch live prices: {liveError}
-          </p>
+
+        {/* Account cards */}
+        {loading ? (
+          <p className="text-muted-foreground text-sm">Loading...</p>
+        ) : accounts.length === 0 ? (
+          <div className="text-center py-16 text-muted-foreground">
+            <Wallet className="h-12 w-12 mx-auto mb-3 opacity-20" />
+            <p className="font-medium">No accounts yet</p>
+            <p className="text-sm mt-1">Add an account to start tracking</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {accounts.map((acc) => (
+              <AccountCard
+                key={acc.id}
+                account={acc}
+                livePrices={live?.prices}
+                onUpdateAccount={handleUpdateAccount}
+                onUpdateHolding={handleUpdateHolding}
+                onDeleteHolding={handleDeleteHolding}
+                onAddHolding={handleAddHolding}
+              />
+            ))}
+          </div>
         )}
       </div>
-
-      {/* Summary bar */}
-      {!loading && accounts.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground mb-1">Total Portfolio</p>
-              <p className="text-xl font-bold tabular-nums">£{fmt(totalPortfolio)}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground mb-1">Holdings P&L</p>
-              <p className={cn("text-xl font-bold tabular-nums", plColor(totalPl))}>
-                {totalPl >= 0 ? "+" : ""}£{fmt(totalPl)}
-              </p>
-              <p className={cn("text-xs tabular-nums", plColor(totalPct))}>
-                {totalPct >= 0 ? "+" : ""}{totalPct.toFixed(2)}%
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground mb-1">Cash (uninvested)</p>
-              <p className="text-xl font-bold tabular-nums">£{fmt(totalCash)}</p>
-              {annualInterestTotal > 0 && (
-                <p className="text-xs text-muted-foreground tabular-nums">~£{fmt(annualInterestTotal)} p.a. projected</p>
-              )}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground mb-1">Cost Basis</p>
-              <p className="text-xl font-bold tabular-nums">£{fmt(totalCost)}</p>
-              <p className="text-xs text-muted-foreground">holdings only</p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Account cards */}
-      {loading ? (
-        <p className="text-muted-foreground text-sm">Loading...</p>
-      ) : accounts.length === 0 ? (
-        <Card>
-          <CardContent className="p-8 text-center text-muted-foreground text-sm">
-            No accounts yet. Add one to get started.
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          {accounts.map((acc) => (
-            <AccountCard
-              key={acc.id}
-              account={acc}
-              livePrices={live?.prices}
-              onUpdateAccount={handleUpdateAccount}
-              onUpdateHolding={handleUpdateHolding}
-              onDeleteHolding={handleDeleteHolding}
-              onAddHolding={handleAddHolding}
-            />
-          ))}
-        </div>
-      )}
-
-      <p className="text-xs text-muted-foreground mt-6 text-center">
-        Prices are manually updated. Last prices reflect the most recent snapshot entered.
-      </p>
-    </div>
+    </>
   );
 }

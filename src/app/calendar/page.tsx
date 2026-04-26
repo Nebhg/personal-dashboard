@@ -3,22 +3,20 @@ import { CalendarView } from "@/components/calendar/CalendarView";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { type CalendarEventDTO } from "@/types";
 import { generateScheduleEvents } from "@/lib/calendar-utils";
-import { Calendar } from "lucide-react";
+import { Topbar } from "@/components/ui/topbar";
 
 export default async function CalendarPage() {
-  const now = new Date();
+  const now        = new Date();
   const monthStart = startOfMonth(now);
   const monthEnd   = endOfMonth(now);
 
-  // Load domain events (workouts, meals, learning, habits) as read-only overlays.
-  // Schedule blocks are excluded — Google Calendar is now the source of truth for those.
   const [storedEvents, workoutPlans, mealPlanEntries, recurringBlocks, wfhDays] =
     await Promise.all([
       prisma.calendarEvent.findMany({
         where: {
           start: { gte: monthStart },
           end:   { lte: monthEnd },
-          area:  { not: "SCHEDULE" }, // exclude old schedule blocks
+          area:  { not: "SCHEDULE" },
         },
         orderBy: { start: "asc" },
       }),
@@ -54,16 +52,25 @@ export default async function CalendarPage() {
     ...virtualEvents,
   ];
 
+  const viewLabel = `${Object.keys({DIET:1,EXERCISE:1,LEARNING:1,HABITS:1,SCHEDULE:1}).length} CATEGORIES`;
+
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold flex items-center gap-2 mb-6">
-        <Calendar className="h-6 w-6 text-blue-500" />
-        Calendar
-      </h1>
-      <CalendarView
-        initialEvents={serialized}
-        initialWfhDates={Array.from(wfhDateSet)}
+    <>
+      <Topbar
+        title="Calendar"
+        crumb={`MONTH VIEW · ${viewLabel}`}
       />
-    </div>
+      <div className="px-8 pt-7 pb-16">
+        <div
+          className="rounded-[6px] overflow-hidden"
+          style={{ background: "var(--card)", border: "1px solid var(--border)" }}
+        >
+          <CalendarView
+            initialEvents={serialized}
+            initialWfhDates={Array.from(wfhDateSet)}
+          />
+        </div>
+      </div>
+    </>
   );
 }

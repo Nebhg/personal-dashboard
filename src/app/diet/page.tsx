@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/dialog";
 import { MealPlanGrid } from "@/components/diet/MealPlanGrid";
 import { Plus, Utensils, Trash2, BookOpen, CalendarDays } from "lucide-react";
+import { Topbar, AtlasBtn } from "@/components/ui/topbar";
+import { StatTile } from "@/components/ui/stat-tile";
 import { format } from "date-fns";
 
 interface MealPlanEntry {
@@ -136,20 +138,69 @@ export default function DietPage() {
     return (grouped[today] ?? []).reduce((sum, m) => sum + (m.calories ?? 0), 0);
   })();
 
+  const todayMeals = grouped[format(new Date(), "yyyy-MM-dd")] ?? [];
+  const todayProtein = todayMeals.reduce((s, m) => s + (m.protein ?? 0), 0);
+  const todayCarbs   = todayMeals.reduce((s, m) => s + (m.carbs   ?? 0), 0);
+  const todayFat     = todayMeals.reduce((s, m) => s + (m.fat     ?? 0), 0);
+
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Utensils className="h-6 w-6 text-green-400" />
-            Diet
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Today: <span className="font-medium text-foreground">{totalToday} kcal</span>
-            {" · "}{recipes.length} recipes in library
-          </p>
+    <>
+      <Topbar
+        title="Diet"
+        crumb={`TODAY · ${todayMeals.length} MEALS LOGGED`}
+        actions={
+          <Dialog open={logOpen} onOpenChange={setLogOpen}>
+            <DialogTrigger asChild>
+              <AtlasBtn variant="primary">
+                <Plus className="h-[13px] w-[13px]" />
+                Log meal
+              </AtlasBtn>
+            </DialogTrigger>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Log a Meal</DialogTitle>
+              </DialogHeader>
+              <MealLogForm
+                recipes={recipes}
+                onSuccess={() => { setLogOpen(false); loadMeals(); }}
+              />
+            </DialogContent>
+          </Dialog>
+        }
+      />
+
+      <div className="px-8 pt-7 pb-16">
+        {/* Stat tiles */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <StatTile
+            label="Calories"
+            num={totalToday > 0 ? totalToday.toLocaleString() : "—"}
+            unit="/ 2,200"
+            sub={<span>{Math.round((totalToday / 2200) * 100)}% of goal</span>}
+            delta={totalToday > 0 ? `${totalToday - 2200 > 0 ? "+" : ""}${totalToday - 2200}` : undefined}
+            deltaDir={totalToday <= 2200 ? "down" : "up"}
+          />
+          <StatTile
+            label="Protein"
+            num={todayProtein}
+            unit="/ 165g"
+            sub={<span>{Math.round((todayProtein / 165) * 100)}% of goal</span>}
+            delta={todayProtein < 165 ? `−${165 - todayProtein}g` : undefined}
+            deltaDir="down"
+          />
+          <StatTile
+            label="Carbs"
+            num={todayCarbs}
+            unit="/ 250g"
+            sub={<span>{Math.round((todayCarbs / 250) * 100)}% of goal</span>}
+          />
+          <StatTile
+            label="Fat"
+            num={todayFat}
+            unit="/ 70g"
+            sub={<span>{todayFat > 70 ? "slightly over" : `${Math.round((todayFat / 70) * 100)}% of goal`}</span>}
+          />
         </div>
-      </div>
 
       <Tabs defaultValue="plan">
         <TabsList className="mb-4">
@@ -184,25 +235,6 @@ export default function DietPage() {
 
         {/* ── MEAL LOG TAB ─────────────────────────────── */}
         <TabsContent value="log">
-          <div className="flex justify-end mb-3">
-            <Dialog open={logOpen} onOpenChange={setLogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" className="gap-1">
-                  <Plus className="h-4 w-4" />
-                  Log Meal
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-lg">
-                <DialogHeader>
-                  <DialogTitle>Log a Meal</DialogTitle>
-                </DialogHeader>
-                <MealLogForm
-                  recipes={recipes}
-                  onSuccess={() => { setLogOpen(false); loadMeals(); }}
-                />
-              </DialogContent>
-            </Dialog>
-          </div>
 
           {meals.length === 0 && (
             <div className="text-center py-16 text-muted-foreground">
@@ -343,6 +375,7 @@ export default function DietPage() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </>
   );
 }

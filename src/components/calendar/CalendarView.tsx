@@ -1,10 +1,18 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { startOfMonth, endOfMonth } from "date-fns";
-import { Calendar, dateFnsLocalizer, type View, type Event } from "react-big-calendar";
-import { format, parse, startOfWeek, getDay } from "date-fns";
-import { enUS } from "date-fns/locale/en-US";
+import {
+  startOfMonth,
+  endOfMonth,
+  startOfWeek,
+  endOfWeek,
+  format,
+  addMonths,
+  subMonths,
+  addWeeks,
+  subWeeks,
+} from "date-fns";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { type CalendarEventDTO, AREA_COLORS, AREA_LABELS } from "@/types";
 import { GoogleEventForm } from "@/components/calendar/GoogleEventForm";
 import { Pencil, Trash2 } from "lucide-react";
@@ -15,32 +23,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import "react-big-calendar/lib/css/react-big-calendar.css";
-
-const localizer = dateFnsLocalizer({
-  format,
-  parse,
-  startOfWeek: () => startOfWeek(new Date(), { weekStartsOn: 1 }),
-  getDay,
-  locales: { "en-US": enUS },
-});
+import { MonthView, type CalEvent } from "@/components/calendar/MonthView";
+import { WeekView } from "@/components/calendar/WeekView";
+import { TodayRail } from "@/components/calendar/TodayRail";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface RBCEvent extends Event {
-  id: string;
-  area: string;
-  color: string | null;
-  description: string | null;
-  location?: string | null;
-  colorId?: string | null;
-  calendarId?: string;
-  start: Date;
-  end: Date;
-  isGoogleEvent?: boolean;
-  isWFH?: boolean;
-  isRecurring?: boolean;
-}
+type View = "month" | "week";
 
 type GCalEventDTO = {
   id: string;
@@ -55,11 +44,35 @@ type GCalEventDTO = {
   calendarId: string;
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+interface InternalEvent extends CalEvent {
+  description: string | null;
+  location?: string | null;
+  colorId?: string | null;
+  calendarId?: string;
+  isGoogleEvent: boolean;
+  isRecurring?: boolean;
+}
 
-const GCAL_DEFAULT_COLOR = "#4285f4"; // Google blue
+const GCAL_DEFAULT_COLOR = "oklch(0.62 0.14 250)";
 
-function gcalToRBC(e: GCalEventDTO): RBCEvent {
+const ALL_AREAS = Object.keys(AREA_LABELS);
+
+const CAT_LIST: Array<{ id: string; label: string; color: string }> = [
+  { id: "DIET",     label: "Diet",     color: "oklch(0.80 0.14 145)" },
+  { id: "EXERCISE", label: "Exercise", color: "oklch(0.78 0.13 165)" },
+  { id: "LEARNING", label: "Learning", color: "oklch(0.78 0.14 280)" },
+  { id: "HABITS",   label: "Habits",   color: "oklch(0.82 0.13 75)"  },
+  { id: "SCHEDULE", label: "Calendar", color: "oklch(0.78 0.15 285)" },
+];
+
+const MONTHS_FULL = [
+  "January","February","March","April","May","June",
+  "July","August","September","October","November","December",
+];
+
+// ── Converters ────────────────────────────────────────────────────────────────
+
+function gcalToInternal(e: GCalEventDTO): InternalEvent {
   return {
     id: e.id,
     title: e.title,
@@ -76,28 +89,21 @@ function gcalToRBC(e: GCalEventDTO): RBCEvent {
   };
 }
 
-function domainToRBC(e: CalendarEventDTO): RBCEvent {
+function domainToInternal(e: CalendarEventDTO): InternalEvent {
   return {
     id: e.id,
-    title: e.title as string,
+    title: e.title,
     start: new Date(e.start),
     end: new Date(e.end),
     allDay: e.allDay,
     area: e.area,
     color: e.color ?? null,
     description: e.description ?? null,
+    isGoogleEvent: false,
     isWFH: e.isWFH,
     isRecurring: e.isRecurring,
-    isGoogleEvent: false,
   };
 }
-
-const SCROLL_TO = new Date(); SCROLL_TO.setHours(7, 0, 0, 0);
-const MIN_TIME   = new Date(); MIN_TIME.setHours(5, 0, 0, 0);
-const MAX_TIME   = new Date(); MAX_TIME.setHours(23, 0, 0, 0);
-
-// Areas shown in filter chips — SCHEDULE = Google Calendar events
-const ALL_AREAS = Object.keys(AREA_LABELS);
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -107,24 +113,24 @@ interface Props {
 }
 
 export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
-  const [view, setView]       = useState<View>("month");
-  const [date, setDate]       = useState(new Date());
-  const [events, setEvents]   = useState<RBCEvent[]>(initialEvents.map(domainToRBC));
-  const [visibleAreas, setVisibleAreas] = useState<Set<string>>(new Set(ALL_AREAS));
-  const [wfhDates, setWfhDates] = useState<Set<string>>(new Set(initialWfhDates));
-  const [currentRange, setCurrentRange] = useState<{ start: Date; end: Date } | null>(null);
+  const today = new Date();
+  const [view, setView]     = useState<View>("month");
+  const [date, setDate]     = useState(new Date());
+  const [events, setEvents] = useState<InternalEvent[]>(initialEvents.map(domainToInternal));
+  const [visibleAreas, setVisibleAreas] = useState<Set<string>>(new Set([...ALL_AREAS, "SCHEDULE"]));
+  const [wfhDates, setWfhDates]         = useState<Set<string>>(new Set(initialWfhDates));
 
-  // Google event create/edit
+  // Create / edit
   const [createOpen, setCreateOpen]   = useState(false);
   const [slotStart, setSlotStart]     = useState<Date | undefined>();
   const [slotEnd, setSlotEnd]         = useState<Date | undefined>();
-  const [editingEvent, setEditingEvent] = useState<RBCEvent | null>(null);
+  const [editingEvent, setEditingEvent] = useState<InternalEvent | null>(null);
 
-  // Event detail view
-  const [selectedEvent, setSelectedEvent] = useState<RBCEvent | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  // Detail view
+  const [selectedEvent, setSelectedEvent] = useState<InternalEvent | null>(null);
+  const [deleting, setDeleting]           = useState(false);
 
-  // ── Data fetching ────────────────────────────────────────────────────────────
+  // ── Data fetching ─────────────────────────────────────────────────────────
 
   const fetchRange = useCallback(async (start: Date, end: Date) => {
     const qs = `from=${start.toISOString()}&to=${end.toISOString()}`;
@@ -133,58 +139,61 @@ export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
       fetch(`/api/calendar?${qs}`),
       fetch(`/api/schedule/wfh?${qs}`),
     ]);
-
-    const gcalEvents: GCalEventDTO[]   = gcalRes.ok  ? await gcalRes.json()  : [];
+    const gcalEvents: GCalEventDTO[]       = gcalRes.ok  ? await gcalRes.json()  : [];
     const domainEvents: CalendarEventDTO[] = domainRes.ok ? await domainRes.json() : [];
-    const wfhData: { date: string }[]  = wfhRes.ok   ? await wfhRes.json()   : [];
-
-    // Domain events excluding old SCHEDULE blocks (replaced by Google Calendar)
+    const wfhData: { date: string }[]      = wfhRes.ok   ? await wfhRes.json()   : [];
     const filteredDomain = domainEvents.filter((e) => e.area !== "SCHEDULE");
-
     setEvents([
-      ...gcalEvents.map(gcalToRBC),
-      ...filteredDomain.map(domainToRBC),
+      ...gcalEvents.map(gcalToInternal),
+      ...filteredDomain.map(domainToInternal),
     ]);
     setWfhDates(new Set(wfhData.map((d) => format(new Date(d.date), "yyyy-MM-dd"))));
   }, []);
 
-  const handleRangeChange = useCallback(
-    (range: Date[] | { start: Date; end: Date }) => {
-      let start: Date, end: Date;
-      if (Array.isArray(range)) { start = range[0]; end = range[range.length - 1]; }
-      else { start = range.start; end = range.end; }
-      setCurrentRange({ start, end });
-      fetchRange(start, end);
-    },
-    [fetchRange]
-  );
-
-  // ── Initial fetch on mount (onRangeChange doesn't fire until navigation) ─────
-
   useEffect(() => {
-    const start = startOfMonth(date);
-    const end = endOfMonth(date);
-    setCurrentRange({ start, end });
+    let start: Date, end: Date;
+    if (view === "month") {
+      start = startOfMonth(date);
+      end   = endOfMonth(date);
+    } else {
+      start = startOfWeek(date, { weekStartsOn: 1 });
+      end   = endOfWeek(date,   { weekStartsOn: 1 });
+    }
     fetchRange(start, end);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [date, view, fetchRange]);
 
-  // ── Event CRUD ───────────────────────────────────────────────────────────────
+  // ── Navigation ────────────────────────────────────────────────────────────
 
-  const handleSelectSlot = useCallback(({ start, end }: { start: Date; end: Date }) => {
+  const goNext  = () => setDate((d) => view === "month" ? addMonths(d, 1) : addWeeks(d, 1));
+  const goPrev  = () => setDate((d) => view === "month" ? subMonths(d, 1) : subWeeks(d, 1));
+  const goToday = () => setDate(new Date());
+
+  // ── Event handlers ────────────────────────────────────────────────────────
+
+  const handleSelectSlot = (start: Date, end: Date) => {
     setSlotStart(start);
     setSlotEnd(end);
     setEditingEvent(null);
     setCreateOpen(true);
-  }, []);
+  };
+
+  const handleSelectDay = (day: Date) => {
+    const start = new Date(day);
+    start.setHours(9, 0, 0, 0);
+    const end = new Date(day);
+    end.setHours(10, 0, 0, 0);
+    handleSelectSlot(start, end);
+  };
 
   const handleFormSuccess = useCallback(() => {
     setCreateOpen(false);
     setEditingEvent(null);
-    if (currentRange) fetchRange(currentRange.start, currentRange.end);
-  }, [currentRange, fetchRange]);
+    const start = view === "month" ? startOfMonth(date) : startOfWeek(date, { weekStartsOn: 1 });
+    const end   = view === "month" ? endOfMonth(date)   : endOfWeek(date,   { weekStartsOn: 1 });
+    fetchRange(start, end);
+  }, [view, date, fetchRange]);
 
-  const handleDeleteEvent = useCallback(async (event: RBCEvent) => {
+  const handleDeleteEvent = useCallback(async (event: InternalEvent) => {
     if (!event.isGoogleEvent) return;
     setDeleting(true);
     await fetch(
@@ -193,10 +202,8 @@ export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
     );
     setDeleting(false);
     setSelectedEvent(null);
-    if (currentRange) fetchRange(currentRange.start, currentRange.end);
-  }, [currentRange, fetchRange]);
-
-  // ── WFH toggle ───────────────────────────────────────────────────────────────
+    handleFormSuccess();
+  }, [handleFormSuccess]);
 
   const toggleWfh = useCallback(async (dateStr: string) => {
     const isWFH = wfhDates.has(dateStr);
@@ -211,183 +218,232 @@ export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
       });
       setWfhDates((prev) => new Set([...prev, dateStr]));
     }
-    if (currentRange) fetchRange(currentRange.start, currentRange.end);
-  }, [wfhDates, currentRange, fetchRange]);
+    handleFormSuccess();
+  }, [wfhDates, handleFormSuccess]);
 
-  // ── Filter ───────────────────────────────────────────────────────────────────
-
-  const toggleArea = useCallback((area: string) => {
+  const toggleArea = (area: string) => {
     setVisibleAreas((prev) => {
       const n = new Set(prev);
       if (n.has(area)) n.delete(area); else n.add(area);
       return n;
     });
-  }, []);
+  };
 
   const filteredEvents = useMemo(
     () => events.filter((e) => visibleAreas.has(e.area)),
     [events, visibleAreas]
   );
 
-  // ── Styling ──────────────────────────────────────────────────────────────────
+  // ── Label ─────────────────────────────────────────────────────────────────
 
-  const eventStyleGetter = useCallback((event: RBCEvent) => {
-    const bg = event.color ?? AREA_COLORS[event.area] ?? "#6b7280";
-    return {
-      style: {
-        backgroundColor: bg,
-        border: "none",
-        borderRadius: "4px",
-        color: "white",
-        fontSize: "0.75rem",
-        padding: "2px 5px",
-        opacity: event.isGoogleEvent ? 1 : 0.75,
-      },
-    };
-  }, []);
+  const weekStart = startOfWeek(date, { weekStartsOn: 1 });
 
-  // ── Custom components ────────────────────────────────────────────────────────
-
-  const dateCellWrapper = useCallback(
-    ({ value, children }: { value: Date; children: React.ReactNode }) => {
-      const dayOfWeek = value.getDay();
-      const isWeekday = dayOfWeek !== 0 && dayOfWeek !== 6;
-      const dateStr = format(value, "yyyy-MM-dd");
-      const isToday = dateStr === format(new Date(), "yyyy-MM-dd");
-      const isWFH = wfhDates.has(dateStr);
-      return (
-        <div className="relative flex-1 min-h-full">
-          {children}
-          {isWeekday && (
-            <button
-              onClick={(e) => { e.stopPropagation(); toggleWfh(dateStr); }}
-              title={isWFH ? "WFH — click to mark office" : "Office — click to mark WFH"}
-              className={`absolute top-1 right-1 z-10 text-xs leading-none transition-opacity ${isWFH ? "opacity-100" : "opacity-0 group-hover:opacity-60 hover:!opacity-100"}`}
-              style={{ fontSize: "14px" }}
+  return (
+    <div>
+      {/* Toolbar */}
+      <div
+        className="flex items-center justify-between px-4 py-[14px]"
+        style={{ borderBottom: "1px solid var(--border)" }}
+      >
+        <div className="flex items-center gap-2">
+          <button
+            onClick={goPrev}
+            className="inline-flex items-center justify-center"
+            style={{
+              width: 28, height: 28,
+              border: "1px solid var(--hairline-strong, oklch(1 0 0 / 0.12))",
+              borderRadius: 4,
+              background: "transparent",
+              color: "var(--fg-2)",
+              cursor: "pointer",
+            }}
+          >
+            <ChevronLeft style={{ width: 13, height: 13 }} />
+          </button>
+          <button
+            onClick={goToday}
+            style={{
+              height: 30, padding: "0 12px",
+              fontSize: 12, fontWeight: 500,
+              border: "1px solid var(--hairline-strong, oklch(1 0 0 / 0.12))",
+              borderRadius: 4,
+              background: "transparent",
+              color: "var(--fg-2)",
+              cursor: "pointer",
+            }}
+          >
+            Today
+          </button>
+          <button
+            onClick={goNext}
+            className="inline-flex items-center justify-center"
+            style={{
+              width: 28, height: 28,
+              border: "1px solid var(--hairline-strong, oklch(1 0 0 / 0.12))",
+              borderRadius: 4,
+              background: "transparent",
+              color: "var(--fg-2)",
+              cursor: "pointer",
+            }}
+          >
+            <ChevronRight style={{ width: 13, height: 13 }} />
+          </button>
+          <div className="ml-3" style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.015em" }}>
+            {view === "month"
+              ? MONTHS_FULL[date.getMonth()]
+              : `${format(weekStart, "MMM d")} — ${format(endOfWeek(date, { weekStartsOn: 1 }), "MMM d")}`}
+            <span
+              className="ml-2"
+              style={{
+                fontFamily: "var(--font-jetbrains-mono, monospace)",
+                fontSize: 13,
+                color: "var(--fg-3)",
+                fontWeight: 400,
+              }}
             >
-              {isWFH ? "🏠" : "🏢"}
-            </button>
-          )}
-          {isToday && <div className="absolute inset-0 ring-2 ring-purple-500 ring-inset pointer-events-none rounded-sm" />}
-        </div>
-      );
-    },
-    [wfhDates, toggleWfh]
-  );
-
-  const dateHeaderComponent = useCallback(
-    ({ date: d, label }: { date: Date; label: string }) => {
-      const isToday = format(d, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd");
-      return (
-        <span className={`inline-flex items-center justify-center w-7 h-7 text-sm rounded-full leading-none ${isToday ? "bg-purple-600 text-white font-bold" : "text-foreground"}`}>
-          {label}
-        </span>
-      );
-    }, []
-  );
-
-  const eventComponent = useCallback(({ event }: { event: RBCEvent }) => {
-    const timeLabel = !event.allDay ? format(event.start, "HH:mm") + " " : "";
-    return (
-      <div className="truncate cursor-pointer" title={`${timeLabel}${event.title as string}${event.description ? `\n${event.description}` : ""}`}>
-        {timeLabel && <span className="opacity-80 font-semibold mr-0.5">{timeLabel}</span>}
-        {event.title as string}
-      </div>
-    );
-  }, []);
-
-  const components = useMemo(
-    () => ({
-      toolbar: (props: { label: string; onNavigate: (a: string) => void; onView: (v: View) => void; view: View }) => (
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <button onClick={() => props.onNavigate("PREV")} className="px-3 py-1.5 text-sm border rounded-md hover:bg-accent transition-colors">←</button>
-            <button onClick={() => props.onNavigate("TODAY")} className="px-3 py-1.5 text-sm border rounded-md hover:bg-accent transition-colors">Today</button>
-            <button onClick={() => props.onNavigate("NEXT")} className="px-3 py-1.5 text-sm border rounded-md hover:bg-accent transition-colors">→</button>
-            <span className="text-base font-semibold ml-2">{props.label}</span>
+              {date.getFullYear()}
+            </span>
           </div>
-          <div className="flex gap-1">
-            {(["month", "week", "day", "agenda"] as View[]).map((v) => (
-              <button key={v} onClick={() => props.onView(v)}
-                className={`px-3 py-1.5 text-sm rounded-md transition-colors capitalize ${props.view === v ? "bg-primary text-primary-foreground" : "border hover:bg-accent"}`}>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {/* View tabs */}
+          <div
+            className="inline-flex overflow-hidden"
+            style={{
+              border: "1px solid var(--hairline-strong, oklch(1 0 0 / 0.12))",
+              borderRadius: 4,
+            }}
+          >
+            {(["month", "week"] as View[]).map((v, i) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                style={{
+                  padding: "5px 12px",
+                  fontFamily: "var(--font-jetbrains-mono, monospace)",
+                  fontSize: 10,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: view === v ? "var(--foreground)" : "var(--fg-3)",
+                  background: view === v ? "var(--muted)" : "transparent",
+                  border: "none",
+                  borderRight: i === 0 ? "1px solid var(--hairline-strong, oklch(1 0 0 / 0.12))" : "none",
+                  cursor: "pointer",
+                }}
+              >
                 {v}
               </button>
             ))}
           </div>
+
+          {/* New event */}
+          <button
+            onClick={() => { setEditingEvent(null); setSlotStart(undefined); setSlotEnd(undefined); setCreateOpen(true); }}
+            className="inline-flex items-center gap-1.5"
+            style={{
+              height: 30, padding: "0 12px",
+              fontSize: 12, fontWeight: 500,
+              borderRadius: 4,
+              background: "var(--primary)",
+              color: "var(--primary-foreground)",
+              border: "none",
+              cursor: "pointer",
+            }}
+          >
+            <Plus style={{ width: 13, height: 13 }} />
+            New event
+          </button>
         </div>
-      ),
-      dateCellWrapper,
-      event: eventComponent,
-      dateHeader: dateHeaderComponent,
-    }),
-    [dateCellWrapper, eventComponent, dateHeaderComponent]
-  );
+      </div>
 
-  // ── Render ───────────────────────────────────────────────────────────────────
-
-  return (
-    <div className="space-y-3">
-      {/* Filter chips */}
-      <div className="flex flex-wrap gap-2 items-center">
-        {ALL_AREAS.map((area) => {
-          const color = area === "SCHEDULE" ? GCAL_DEFAULT_COLOR : AREA_COLORS[area];
-          const active = visibleAreas.has(area);
+      {/* Category filters */}
+      <div
+        className="flex flex-wrap items-center gap-0 px-4 py-[10px]"
+        style={{ borderBottom: "1px solid var(--border)" }}
+      >
+        {CAT_LIST.map((c) => {
+          const on = visibleAreas.has(c.id);
           return (
-            <button key={area} onClick={() => toggleArea(area)}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all ${active ? "text-white border-transparent" : "bg-transparent text-muted-foreground border-border"}`}
-              style={active ? { backgroundColor: color, borderColor: color } : {}}>
-              <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: active ? "rgba(255,255,255,0.7)" : color }} />
-              {area === "SCHEDULE" ? "Google Calendar" : AREA_LABELS[area]}
+            <button
+              key={c.id}
+              onClick={() => toggleArea(c.id)}
+              className="inline-flex items-center gap-1.5"
+              style={{
+                padding: "5px 12px",
+                fontFamily: "var(--font-jetbrains-mono, monospace)",
+                fontSize: 10,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: on ? "var(--foreground)" : "var(--fg-3)",
+                background: "transparent",
+                border: "none",
+                borderBottom: on ? "1px solid currentColor" : "1px solid transparent",
+                cursor: "pointer",
+              }}
+            >
+              <span
+                style={{
+                  width: 6, height: 6, borderRadius: "50%",
+                  background: c.color,
+                  opacity: on ? 1 : 0.35,
+                }}
+              />
+              {c.label}
             </button>
           );
         })}
-        <span className="flex items-center gap-1 px-3 py-1 text-xs text-muted-foreground">
-          🏠 = WFH (click weekday to toggle)
+        <span className="flex-1" />
+        <span
+          style={{
+            fontFamily: "var(--font-jetbrains-mono, monospace)",
+            fontSize: 10,
+            letterSpacing: "0.08em",
+            color: "var(--fg-3)",
+            textTransform: "uppercase",
+            padding: "5px 0",
+          }}
+        >
+          WFH · hover day to toggle
         </span>
       </div>
 
-      {/* Calendar */}
-      <div className={`
-        h-[calc(100vh-13rem)]
-        [&_.rbc-calendar]:font-sans [&_.rbc-header]:text-xs [&_.rbc-header]:font-medium
-        [&_.rbc-today]:bg-purple-900/30 [&_.rbc-off-range-bg]:bg-muted/30
-        [&_.rbc-month-view]:bg-card [&_.rbc-header]:bg-card [&_.rbc-time-view]:bg-card
-        [&_.rbc-agenda-view]:bg-card [&_.rbc-day-bg]:bg-card [&_.rbc-show-more]:text-primary
-        [&_.rbc-current-time-indicator]:bg-purple-500 [&_.rbc-current-time-indicator]:h-0.5
-        [&_.rbc-time-slot]:text-xs [&_.rbc-time-slot]:text-muted-foreground
-        [&_.rbc-label]:text-xs [&_.rbc-label]:text-muted-foreground
-        [&_.rbc-agenda-date-cell]:font-medium [&_.rbc-agenda-time-cell]:text-muted-foreground
-        [&_.rbc-agenda-event-cell]:text-sm [&_.rbc-day-slot_.rbc-event]:min-h-[24px]
-        [&_.rbc-event-label]:text-[10px] [&_.rbc-event-label]:font-medium
-      `}>
-        <Calendar
-          localizer={localizer}
-          events={filteredEvents}
-          startAccessor="start"
-          endAccessor="end"
-          titleAccessor="title"
-          allDayAccessor="allDay"
-          view={view}
-          date={date}
-          onView={setView}
-          onNavigate={setDate}
-          onRangeChange={handleRangeChange}
-          onSelectSlot={handleSelectSlot}
-          onSelectEvent={(e) => setSelectedEvent(e as RBCEvent)}
-          eventPropGetter={eventStyleGetter}
-          components={components as Record<string, unknown>}
-          selectable
-          popup
-          scrollToTime={SCROLL_TO}
-          min={MIN_TIME}
-          max={MAX_TIME}
-          step={15}
-          timeslots={4}
-        />
+      {/* Calendar body + rail */}
+      <div className="flex gap-4 p-4">
+        <div
+          className="flex-1 rounded-[6px] overflow-hidden"
+          style={{ border: "1px solid var(--border)" }}
+        >
+          {view === "month" ? (
+            <MonthView
+              year={date.getFullYear()}
+              month={date.getMonth()}
+              today={today}
+              events={filteredEvents}
+              wfhDates={wfhDates}
+              onSelectDay={handleSelectDay}
+              onSelectEvent={(e) => setSelectedEvent(e as InternalEvent)}
+              onToggleWfh={toggleWfh}
+            />
+          ) : (
+            <WeekView
+              weekStart={weekStart}
+              today={today}
+              events={filteredEvents}
+              onSelectEvent={(e) => setSelectedEvent(e as InternalEvent)}
+              onSelectSlot={handleSelectSlot}
+            />
+          )}
+        </div>
+
+        {/* Today rail */}
+        <div style={{ width: 280, flexShrink: 0 }}>
+          <TodayRail today={today} events={events} wfhDates={wfhDates} />
+        </div>
       </div>
 
-      {/* Create event dialog */}
-      <Dialog open={createOpen} onOpenChange={(o) => { if (!o) setCreateOpen(false); }}>
+      {/* Create / edit dialog */}
+      <Dialog open={createOpen} onOpenChange={(o) => { if (!o) { setCreateOpen(false); setEditingEvent(null); } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingEvent ? "Edit event" : "New Google Calendar event"}</DialogTitle>
@@ -395,17 +451,21 @@ export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
           <GoogleEventForm
             initialStart={slotStart}
             initialEnd={slotEnd}
-            initialData={editingEvent ? {
-              id: editingEvent.id,
-              title: editingEvent.title as string,
-              start: editingEvent.start.toISOString(),
-              end: editingEvent.end.toISOString(),
-              allDay: editingEvent.allDay,
-              description: editingEvent.description ?? "",
-              location: editingEvent.location ?? "",
-              colorId: editingEvent.colorId ?? "",
-              calendarId: editingEvent.calendarId,
-            } : undefined}
+            initialData={
+              editingEvent
+                ? {
+                    id: editingEvent.id,
+                    title: editingEvent.title as string,
+                    start: editingEvent.start.toISOString(),
+                    end: editingEvent.end.toISOString(),
+                    allDay: editingEvent.allDay,
+                    description: editingEvent.description ?? "",
+                    location: editingEvent.location ?? "",
+                    colorId: editingEvent.colorId ?? "",
+                    calendarId: editingEvent.calendarId,
+                  }
+                : undefined
+            }
             onSuccess={handleFormSuccess}
             onCancel={() => { setCreateOpen(false); setEditingEvent(null); }}
           />
@@ -413,7 +473,10 @@ export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
       </Dialog>
 
       {/* Event detail dialog */}
-      <Dialog open={!!selectedEvent && !createOpen} onOpenChange={(o) => { if (!o) setSelectedEvent(null); }}>
+      <Dialog
+        open={!!selectedEvent && !createOpen}
+        onOpenChange={(o) => { if (!o) setSelectedEvent(null); }}
+      >
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-base pr-6">{selectedEvent?.title as string}</DialogTitle>
@@ -421,21 +484,33 @@ export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
           {selectedEvent && (
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full shrink-0"
-                  style={{ backgroundColor: selectedEvent.color ?? AREA_COLORS[selectedEvent.area] ?? "#6b7280" }} />
+                <span
+                  className="h-3 w-3 rounded-full shrink-0"
+                  style={{
+                    backgroundColor:
+                      selectedEvent.color ??
+                      AREA_COLORS[selectedEvent.area] ??
+                      "#6b7280",
+                  }}
+                />
                 <span className="text-muted-foreground">
-                  {selectedEvent.isGoogleEvent ? "Google Calendar" : (AREA_LABELS[selectedEvent.area] ?? selectedEvent.area)}
+                  {selectedEvent.isGoogleEvent
+                    ? "Google Calendar"
+                    : (AREA_LABELS[selectedEvent.area] ?? selectedEvent.area)}
                   {selectedEvent.isRecurring && " · Recurring"}
                   {selectedEvent.isWFH && " · Working from home"}
                 </span>
               </div>
               {!selectedEvent.allDay && (
                 <p className="text-muted-foreground">
-                  {format(selectedEvent.start, "EEE d MMM, HH:mm")} – {format(selectedEvent.end, "HH:mm")}
+                  {format(selectedEvent.start, "EEE d MMM, HH:mm")} –{" "}
+                  {format(selectedEvent.end, "HH:mm")}
                 </p>
               )}
               {selectedEvent.allDay && (
-                <p className="text-muted-foreground">{format(selectedEvent.start, "EEE d MMM")} · All day</p>
+                <p className="text-muted-foreground">
+                  {format(selectedEvent.start, "EEE d MMM")} · All day
+                </p>
               )}
               {selectedEvent.location && (
                 <p className="text-muted-foreground">📍 {selectedEvent.location}</p>
@@ -445,14 +520,27 @@ export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
               )}
               {selectedEvent.isGoogleEvent && (
                 <div className="flex gap-2 pt-2">
-                  <Button size="sm" variant="outline" className="flex-1"
-                    onClick={() => { setEditingEvent(selectedEvent); setSelectedEvent(null); setCreateOpen(true); }}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      setEditingEvent(selectedEvent);
+                      setSelectedEvent(null);
+                      setCreateOpen(true);
+                    }}
+                  >
                     <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
                   </Button>
-                  <Button size="sm" variant="destructive" className="flex-1"
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="flex-1"
                     disabled={deleting}
-                    onClick={() => handleDeleteEvent(selectedEvent)}>
-                    <Trash2 className="h-3.5 w-3.5 mr-1" /> {deleting ? "Deleting…" : "Delete"}
+                    onClick={() => handleDeleteEvent(selectedEvent)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                    {deleting ? "Deleting…" : "Delete"}
                   </Button>
                 </div>
               )}
