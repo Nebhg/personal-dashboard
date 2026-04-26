@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { workoutSchema } from "@/lib/validations/exercise";
 import { AREA_COLORS } from "@/types";
+import { pushWorkoutToGCal } from "@/lib/gcal-sync";
 
 export async function GET() {
   const workouts = await prisma.workoutSession.findMany({
@@ -18,6 +19,7 @@ export async function POST(req: NextRequest) {
     const data = workoutSchema.parse(body);
 
     const endTime = new Date(data.date.getTime() + data.durationMin * 60 * 1000);
+    const title = `${data.name} (${data.durationMin}min)`;
 
     const workout = await prisma.workoutSession.create({
       data: {
@@ -38,7 +40,7 @@ export async function POST(req: NextRequest) {
         },
         calendarEvent: {
           create: {
-            title: `${data.name} (${data.durationMin}min)`,
+            title,
             start: data.date,
             end: endTime,
             allDay: false,
@@ -49,6 +51,18 @@ export async function POST(req: NextRequest) {
       },
       include: { exercises: true, calendarEvent: true },
     });
+
+    // Fire-and-forget GCal sync
+    if (workout.calendarEvent) {
+      pushWorkoutToGCal(
+        workout.id,
+        workout.calendarEvent.id,
+        title,
+        data.date,
+        endTime,
+        data.notes
+      ).catch(() => {});
+    }
 
     return NextResponse.json(workout, { status: 201 });
   } catch (err) {

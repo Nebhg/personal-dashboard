@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { recurringBlockSchema } from "@/lib/validations/recurring-block";
 import { SCHEDULE_CATEGORIES } from "@/types";
+import { pushRecurringBlockToGCal } from "@/lib/gcal-sync";
 
 export async function GET() {
   const blocks = await prisma.recurringBlock.findMany({
@@ -30,6 +31,17 @@ export async function POST(req: Request) {
       notes: data.notes ?? null,
     },
   });
+
+  // Fire-and-forget GCal sync
+  pushRecurringBlockToGCal(
+    block.id,
+    block.title,
+    data.daysOfWeek,
+    data.startTime,
+    data.endTime,
+    data.endsOn,
+    data.notes
+  ).catch(() => {});
 
   return NextResponse.json(block, { status: 201 });
 }

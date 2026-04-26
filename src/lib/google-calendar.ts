@@ -76,7 +76,7 @@ export async function listEvents(from: Date, to: Date, calendarId = PRIMARY_CALE
 }
 
 export async function createEvent(
-  data: { title: string; start: string; end: string; allDay?: boolean; description?: string; location?: string; colorId?: string },
+  data: { title: string; start: string; end: string; allDay?: boolean; description?: string; location?: string; colorId?: string; recurrence?: string[] },
   calendarId = PRIMARY_CALENDAR
 ): Promise<GCalEvent> {
   const cal = getClient();
@@ -87,6 +87,7 @@ export async function createEvent(
       description: data.description || undefined,
       location: data.location || undefined,
       colorId: data.colorId || undefined,
+      recurrence: data.recurrence || undefined,
       start: data.allDay
         ? { date: data.start.split("T")[0] }
         : { dateTime: data.start, timeZone: "Europe/London" },

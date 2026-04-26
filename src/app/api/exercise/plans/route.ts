@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { workoutPlanSchema } from "@/lib/validations/exercise";
+import { pushWorkoutPlanToGCal } from "@/lib/gcal-sync";
 
 export async function GET() {
   const plans = await prisma.workoutPlan.findMany({
@@ -34,6 +35,18 @@ export async function POST(req: Request) {
     },
     include: { exercises: { orderBy: { order: "asc" } } },
   });
+
+  // Fire-and-forget GCal sync (only if scheduled days + time are set)
+  const days = data.scheduledDays ?? [];
+  if (days.length > 0 && data.scheduledTime) {
+    pushWorkoutPlanToGCal(
+      plan.id,
+      plan.name,
+      days,
+      data.scheduledTime,
+      data.description
+    ).catch(() => {});
+  }
 
   return NextResponse.json(plan, { status: 201 });
 }

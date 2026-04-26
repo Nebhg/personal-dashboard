@@ -36,6 +36,8 @@ model CalendarEvent {
   scheduleBlockId   String?          @unique
   scheduleBlock     ScheduleBlock?   @relation(fields: [scheduleBlockId], references: [id], onDelete: Cascade)
 
+  gcalEventId String?  // Google Calendar event ID (set after async push)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -136,6 +138,7 @@ model WorkoutPlan {
   description   String?
   scheduledDays String               @default("[]") // JSON array of 0-6 (0=Sun,1=Mon,...,6=Sat)
   scheduledTime String?              // "HH:MM" e.g. "07:00" — used for virtual calendar events
+  gcalEventId   String?              // Google Calendar recurring event ID
   exercises     WorkoutPlanExercise[]
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
@@ -275,6 +278,7 @@ model RecurringBlock {
   daysOfWeek  String    @default("[]") // JSON int array of 0-6 (0=Sun)
   endsOn      DateTime? // optional recurrence end date (inclusive)
   notes       String?
+  gcalEventId String?   // Google Calendar recurring event ID
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 }

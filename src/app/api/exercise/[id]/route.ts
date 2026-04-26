@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { workoutSchema } from "@/lib/validations/exercise";
+import { syncUpdateToGCal, syncDeleteFromGCal } from "@/lib/gcal-sync";
 
 export async function GET(
   _req: NextRequest,
@@ -38,18 +39,32 @@ export async function PATCH(
     if (data.name || data.durationMin || data.date) {
       const updated = await prisma.workoutSession.findUnique({
         where: { id },
-        select: { name: true, durationMin: true, date: true, calendarEvent: { select: { id: true } } },
+        select: {
+          name: true,
+          durationMin: true,
+          date: true,
+          notes: true,
+          calendarEvent: { select: { id: true, gcalEventId: true } },
+        },
       });
       if (updated?.calendarEvent?.id) {
         const endTime = new Date(updated.date.getTime() + updated.durationMin * 60 * 1000);
+        const title = `${updated.name} (${updated.durationMin}min)`;
+
         await prisma.calendarEvent.update({
           where: { id: updated.calendarEvent.id },
-          data: {
-            title: `${updated.name} (${updated.durationMin}min)`,
+          data: { title, start: updated.date, end: endTime },
+        });
+
+        // Sync update to GCal if linked
+        if (updated.calendarEvent.gcalEventId) {
+          syncUpdateToGCal(updated.calendarEvent.gcalEventId, {
+            title,
             start: updated.date,
             end: endTime,
-          },
-        });
+            description: updated.notes,
+          }).catch(() => {});
+        }
       }
     }
 
@@ -64,6 +79,20 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+
+  // Look up gcalEventId before cascade-deleting
+  const workout = await prisma.workoutSession.findUnique({
+    where: { id },
+    select: { calendarEvent: { select: { gcalEventId: true } } },
+  });
+  const gcalEventId = workout?.calendarEvent?.gcalEventId;
+
   await prisma.workoutSession.delete({ where: { id } });
+
+  // Fire-and-forget GCal delete
+  if (gcalEventId) {
+    syncDeleteFromGCal(gcalEventId).catch(() => {});
+  }
+
   return NextResponse.json({ ok: true });
 }

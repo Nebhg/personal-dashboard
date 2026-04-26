@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { learningSessionSchema } from "@/lib/validations/learning";
 import { AREA_COLORS } from "@/types";
+import { pushLearningToGCal } from "@/lib/gcal-sync";
 
 export async function GET() {
   const sessions = await prisma.learningSession.findMany({
@@ -17,6 +18,7 @@ export async function POST(req: NextRequest) {
     const data = learningSessionSchema.parse(body);
 
     const endTime = new Date(data.date.getTime() + data.durationMin * 60 * 1000);
+    const title = `${data.category}: ${data.title}`;
 
     const session = await prisma.learningSession.create({
       data: {
@@ -28,7 +30,7 @@ export async function POST(req: NextRequest) {
         resource: data.resource ?? null,
         calendarEvent: {
           create: {
-            title: `${data.category}: ${data.title}`,
+            title,
             start: data.date,
             end: endTime,
             allDay: false,
@@ -39,6 +41,19 @@ export async function POST(req: NextRequest) {
       },
       include: { calendarEvent: true },
     });
+
+    // Fire-and-forget GCal sync
+    if (session.calendarEvent) {
+      pushLearningToGCal(
+        session.id,
+        session.calendarEvent.id,
+        title,
+        data.date,
+        endTime,
+        data.notes,
+        data.resource
+      ).catch(() => {});
+    }
 
     return NextResponse.json(session, { status: 201 });
   } catch (err) {
