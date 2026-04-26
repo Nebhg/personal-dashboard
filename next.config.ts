@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
-  serverExternalPackages: ["yahoo-finance2"],
+  serverExternalPackages: ["yahoo-finance2", "googleapis"],
 };
 
 export default nextConfig;

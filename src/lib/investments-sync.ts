@@ -41,7 +41,7 @@ export async function regeneratePortfolioMd(): Promise<void> {
           lines.push(`- **Projected annual interest:** £${annualInterest.toFixed(2)}`);
         }
         if ((acc as { totalReturnGbp?: number | null }).totalReturnGbp != null) {
-          lines.push(`- **Interest earned to date:** £${((acc as { totalReturnGbp: number }).totalReturnGbp).toFixed(2)}`);
+          lines.push(`- **Interest earned to date:** £${((acc as unknown as { totalReturnGbp: number }).totalReturnGbp).toFixed(2)}`);
         }
       }
       if (acc.isaAllowanceUsed !== null && acc.isaAllowanceUsed !== undefined) {
