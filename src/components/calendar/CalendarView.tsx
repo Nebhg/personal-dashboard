@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
+import { startOfMonth, endOfMonth } from "date-fns";
 import { Calendar, dateFnsLocalizer, type View, type Event } from "react-big-calendar";
 import { format, parse, startOfWeek, getDay } from "date-fns";
 import { enUS } from "date-fns/locale/en-US";
@@ -157,6 +158,16 @@ export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
     },
     [fetchRange]
   );
+
+  // ── Initial fetch on mount (onRangeChange doesn't fire until navigation) ─────
+
+  useEffect(() => {
+    const start = startOfMonth(date);
+    const end = endOfMonth(date);
+    setCurrentRange({ start, end });
+    fetchRange(start, end);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Event CRUD ───────────────────────────────────────────────────────────────
 

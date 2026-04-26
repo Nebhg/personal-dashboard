@@ -1,4 +1,9 @@
-import "dotenv/config";
+import * as dotenv from "dotenv";
+import * as path from "path";
+// Load .env.local first (dashboard OAuth creds), then .env as fallback
+dotenv.config({ path: path.join(__dirname, "../.env.local") });
+dotenv.config({ path: path.join(__dirname, "../.env") });
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -6,7 +11,7 @@ import { createClient, type InValue } from "@libsql/client";
 import { startOfDay, subDays, format } from "date-fns";
 import { randomUUID } from "crypto";
 import * as fs from "fs";
-import * as path from "path";
+import { google } from "googleapis";
 
 const TRACKER_MD_PATH = path.join(process.env.HOME ?? "~", "career_tracker", "tracker.md");
 
@@ -1248,6 +1253,227 @@ server.tool(
     await db.execute({ sql: `UPDATE "MacroTopic" SET ${updates.join(", ")} WHERE id = ?`, args });
     await regenerateMacroProgress();
     return { content: [{ type: "text" as const, text: `Updated "${row.topic}" → ${MACRO_LEVEL_EMOJI[level]} ${level}. progress.md updated.` }] };
+  }
+);
+
+// ─── GOOGLE CALENDAR ──────────────────────────────────────────────────────────
+
+function getGCalClient() {
+  const oauth2 = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  oauth2.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
+  return google.calendar({ version: "v3", auth: oauth2 });
+}
+
+const GCAL_DAY_NAMES = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+
+function buildRRule(daysOfWeek: number[], endsOn?: string | null): string {
+  const byDay = daysOfWeek.map((d) => GCAL_DAY_NAMES[d]).join(",");
+  let rule = `RRULE:FREQ=WEEKLY;BYDAY=${byDay}`;
+  if (endsOn) {
+    const until = new Date(endsOn).toISOString().replace(/[-:.]/g, "").slice(0, 15) + "Z";
+    rule += `;UNTIL=${until}`;
+  }
+  return rule;
+}
+
+/** Find the next (or today's) date matching one of the given days, combined with a HH:MM time. */
+function nextOccurrenceISO(daysOfWeek: number[], timeStr: string): string {
+  const now = new Date();
+  const todayDow = now.getDay();
+  const sorted = [...daysOfWeek].sort((a, b) => a - b);
+  const targetDow = sorted.find((d) => d >= todayDow) ?? sorted[0];
+  const daysAhead = ((targetDow - todayDow) + 7) % 7;
+  const date = new Date(now);
+  date.setDate(date.getDate() + daysAhead);
+  const [hh, mm] = timeStr.split(":").map(Number);
+  date.setHours(hh, mm, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(hh)}:${pad(mm)}:00`;
+}
+
+server.tool(
+  "list_google_calendar_events",
+  "List upcoming Google Calendar events. Defaults to the next 7 days.",
+  {
+    from: z.string().optional().describe("Start date YYYY-MM-DD (default: today)"),
+    to: z.string().optional().describe("End date YYYY-MM-DD (default: 7 days from now)"),
+    maxResults: z.number().int().optional().default(25).describe("Max events to return (default 25)"),
+  },
+  async ({ from, to, maxResults }) => {
+    try {
+      const cal = getGCalClient();
+      const timeMin = from ? new Date(from).toISOString() : new Date().toISOString();
+      const timeMax = to
+        ? new Date(to + "T23:59:59").toISOString()
+        : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      const res = await cal.events.list({
+        calendarId: "primary",
+        timeMin,
+        timeMax,
+        singleEvents: true,
+        orderBy: "startTime",
+        maxResults: maxResults ?? 25,
+      });
+
+      const events = (res.data.items ?? []).map((e) => {
+        const allDay = !!e.start?.date;
+        return {
+          id: e.id,
+          title: e.summary ?? "(no title)",
+          start: allDay ? e.start?.date : e.start?.dateTime,
+          end: allDay ? e.end?.date : e.end?.dateTime,
+          allDay,
+          location: e.location ?? null,
+          description: e.description ?? null,
+          recurring: !!e.recurringEventId,
+        };
+      });
+
+      if (events.length === 0) {
+        return { content: [{ type: "text" as const, text: "No events found in that range." }] };
+      }
+
+      const lines = events.map((e) =>
+        `[${e.id}] ${e.start?.slice(0, 16).replace("T", " ")} — ${e.title}${e.location ? ` @ ${e.location}` : ""}${e.recurring ? " 🔁" : ""}`
+      );
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Error: ${String(err)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "create_google_calendar_event",
+  "Create a one-off Google Calendar event. Use create_recurring_google_calendar_event for weekly repeating events.",
+  {
+    title: z.string().describe("Event title"),
+    start: z.string().describe("Start as ISO datetime (2026-05-01T19:00:00) or date only (2026-05-01) for all-day"),
+    end: z.string().describe("End as ISO datetime or date only. For all-day, use the same date or day after."),
+    allDay: z.boolean().optional().default(false),
+    description: z.string().optional(),
+    location: z.string().optional(),
+    colorId: z.string().optional().describe("1=lavender 2=sage 3=grape 4=flamingo 5=banana 6=tangerine 7=peacock 8=graphite 9=blueberry 10=basil 11=tomato"),
+  },
+  async ({ title, start, end, allDay, description, location, colorId }) => {
+    try {
+      const cal = getGCalClient();
+      const res = await cal.events.insert({
+        calendarId: "primary",
+        requestBody: {
+          summary: title,
+          description: description || undefined,
+          location: location || undefined,
+          colorId: colorId || undefined,
+          start: allDay ? { date: start.split("T")[0] } : { dateTime: start, timeZone: "Europe/London" },
+          end: allDay ? { date: end.split("T")[0] } : { dateTime: end, timeZone: "Europe/London" },
+        },
+      });
+      const ev = res.data;
+      const startStr = ev.start?.dateTime ?? ev.start?.date ?? start;
+      return { content: [{ type: "text" as const, text: `Created "${title}" on ${startStr.slice(0, 16).replace("T", " ")} (ID: ${ev.id})` }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Error: ${String(err)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "create_recurring_google_calendar_event",
+  "Create a weekly recurring Google Calendar event — gym sessions, work blocks, routines, etc.",
+  {
+    title: z.string().describe("Event title e.g. 'Morning gym', 'MCL stretching'"),
+    daysOfWeek: z.array(z.number().int().min(0).max(6)).describe("Days to repeat: 0=Sun 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat"),
+    startTime: z.string().describe("Start time HH:MM e.g. '07:00'"),
+    endTime: z.string().describe("End time HH:MM e.g. '08:00'"),
+    description: z.string().optional(),
+    location: z.string().optional(),
+    endsOn: z.string().optional().describe("Date to stop recurring YYYY-MM-DD. Omit for indefinite."),
+    colorId: z.string().optional().describe("1=lavender 2=sage 3=grape 4=flamingo 5=banana 6=tangerine 7=peacock 8=graphite 9=blueberry 10=basil 11=tomato"),
+  },
+  async ({ title, daysOfWeek, startTime, endTime, description, location, endsOn, colorId }) => {
+    if (daysOfWeek.length === 0) {
+      return { content: [{ type: "text" as const, text: "Error: daysOfWeek must not be empty." }] };
+    }
+    try {
+      const cal = getGCalClient();
+      const startISO = nextOccurrenceISO(daysOfWeek, startTime);
+      const endISO = nextOccurrenceISO(daysOfWeek, endTime);
+      const rrule = buildRRule(daysOfWeek, endsOn);
+
+      const res = await cal.events.insert({
+        calendarId: "primary",
+        requestBody: {
+          summary: title,
+          description: description || undefined,
+          location: location || undefined,
+          colorId: colorId || undefined,
+          recurrence: [rrule],
+          start: { dateTime: startISO, timeZone: "Europe/London" },
+          end: { dateTime: endISO, timeZone: "Europe/London" },
+        },
+      });
+      const dayStr = daysOfWeek.map((d) => ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d]).join(", ");
+      return { content: [{ type: "text" as const, text: `Created recurring event "${title}" every ${dayStr} ${startTime}–${endTime}${endsOn ? ` until ${endsOn}` : ""}. ID: ${res.data.id}` }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Error: ${String(err)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "update_google_calendar_event",
+  "Update an existing Google Calendar event — change title, time, description, location, or colour. Use list_google_calendar_events to find the event ID.",
+  {
+    eventId: z.string().describe("Google Calendar event ID"),
+    title: z.string().optional().describe("New title"),
+    start: z.string().optional().describe("New start ISO datetime or date"),
+    end: z.string().optional().describe("New end ISO datetime or date"),
+    allDay: z.boolean().optional(),
+    description: z.string().optional(),
+    location: z.string().optional(),
+    colorId: z.string().optional().describe("1=lavender 2=sage 3=grape 4=flamingo 5=banana 6=tangerine 7=peacock 8=graphite 9=blueberry 10=basil 11=tomato"),
+  },
+  async ({ eventId, title, start, end, allDay, description, location, colorId }) => {
+    try {
+      const cal = getGCalClient();
+      const patch: Record<string, unknown> = {};
+      if (title !== undefined) patch.summary = title;
+      if (description !== undefined) patch.description = description;
+      if (location !== undefined) patch.location = location;
+      if (colorId !== undefined) patch.colorId = colorId;
+      if (start !== undefined) {
+        patch.start = allDay ? { date: start.split("T")[0] } : { dateTime: start, timeZone: "Europe/London" };
+      }
+      if (end !== undefined) {
+        patch.end = allDay ? { date: end.split("T")[0] } : { dateTime: end, timeZone: "Europe/London" };
+      }
+      await cal.events.patch({ calendarId: "primary", eventId, requestBody: patch });
+      return { content: [{ type: "text" as const, text: `Updated event ${eventId}${title ? ` — now titled "${title}"` : ""}` }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Error: ${String(err)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "delete_google_calendar_event",
+  "Delete a Google Calendar event by ID. Use list_google_calendar_events to find the ID first.",
+  {
+    eventId: z.string().describe("Google Calendar event ID to delete"),
+  },
+  async ({ eventId }) => {
+    try {
+      const cal = getGCalClient();
+      await cal.events.delete({ calendarId: "primary", eventId });
+      return { content: [{ type: "text" as const, text: `Deleted event ${eventId}` }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Error: ${String(err)}` }] };
+    }
   }
 );
 

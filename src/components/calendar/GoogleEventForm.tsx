@@ -75,18 +75,22 @@ export function GoogleEventForm({ initialStart, initialEnd, initialData, onSucce
     };
 
     try {
-      if (isEdit) {
-        await fetch(`/api/google-calendar/events/${initialData!.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-      } else {
-        await fetch("/api/google-calendar/events", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
+      const res = isEdit
+        ? await fetch(`/api/google-calendar/events/${initialData!.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+        : await fetch("/api/google-calendar/events", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error ?? `Request failed (${res.status})`);
+        return;
       }
       onSuccess();
     } catch (e) {
