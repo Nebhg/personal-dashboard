@@ -135,9 +135,9 @@ export default async function DashboardPage() {
         }
       />
 
-      <div className="px-8 pt-7 pb-16 max-w-[1400px]">
+      <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-10 lg:pb-16 max-w-[1400px]">
         {/* Row 1 — Stat tiles */}
-        <div className="grid grid-cols-4 gap-4 mb-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-3 lg:mb-4">
           <Link href="/diet">
             <StatTile
               label="Calories today"
@@ -217,9 +217,9 @@ export default async function DashboardPage() {
         </div>
 
         {/* Row 2 — Today schedule + Habits today */}
-        <div className="grid grid-cols-12 gap-4 mb-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-4 mb-3 lg:mb-4">
           {/* Today schedule — 7 cols */}
-          <div className="col-span-7">
+          <div className="lg:col-span-7">
             <Panel>
               <PanelHead>
                 <PanelTitle>{"Today's schedule"}</PanelTitle>
@@ -267,7 +267,7 @@ export default async function DashboardPage() {
           </div>
 
           {/* Habits today — 5 cols */}
-          <div className="col-span-5">
+          <div className="lg:col-span-5">
             <Panel>
               <PanelHead>
                 <PanelTitle>{"Habits · today"}</PanelTitle>
@@ -327,9 +327,9 @@ export default async function DashboardPage() {
         </div>
 
         {/* Row 3 — Macros + This week */}
-        <div className="grid grid-cols-12 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-4">
           {/* Macros · today — 6 cols */}
-          <div className="col-span-6">
+          <div className="lg:col-span-6">
             <Panel>
               <PanelHead>
                 <PanelTitle>{"Macros · today"}</PanelTitle>
@@ -372,7 +372,7 @@ export default async function DashboardPage() {
           </div>
 
           {/* This week — 6 cols */}
-          <div className="col-span-6">
+          <div className="lg:col-span-6">
             <Panel>
               <PanelHead>
                 <PanelTitle>This week</PanelTitle>

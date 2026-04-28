@@ -11,23 +11,24 @@ export function Topbar({ title, crumb, actions, className }: TopbarProps) {
   return (
     <div
       className={cn(
-        "flex items-center justify-between px-8 py-5",
+        "flex items-center justify-between py-5",
+        "pl-14 pr-4 lg:px-8",
         "border-b border-border sticky top-0 z-10",
         "bg-[color-mix(in_oklab,var(--background)_92%,transparent)] backdrop-blur-[8px]",
         className
       )}
     >
-      <div className="flex items-baseline gap-4">
-        <h1 className="text-[18px] font-semibold tracking-[-0.01em] m-0 leading-none">
+      <div className="flex items-baseline gap-3 min-w-0">
+        <h1 className="text-[17px] lg:text-[18px] font-semibold tracking-[-0.01em] m-0 leading-none shrink-0">
           {title}
         </h1>
         {crumb && (
-          <span className="mono text-[11px] text-[var(--fg-3,oklch(0.58_0.01_240))] tracking-[0.04em] uppercase">
+          <span className="mono text-[11px] text-[var(--fg-3,oklch(0.58_0.01_240))] tracking-[0.04em] uppercase hidden sm:inline truncate">
             {crumb}
           </span>
         )}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {actions && <div className="flex items-center gap-2 shrink-0 ml-3">{actions}</div>}
     </div>
   );
 }

@@ -270,8 +270,8 @@ export default function LeetCodePage() {
         actions={<LogProblemDialog onSave={load} />}
       />
 
-      <div className="px-8 pt-7 pb-16 max-w-4xl">
-        <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-10 lg:pb-16 max-w-4xl">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-4 lg:mb-6">
           <StatTile label="Problems" num={problems.length} sub={<span>all time</span>} />
           <StatTile label="This week" num={thisWeek} sub={<span>last 7 days</span>} />
           <StatTile label="Avg confidence" num={avgConf ?? "—"} unit={avgConf ? "/10" : ""} sub={<span>self-rated</span>} />

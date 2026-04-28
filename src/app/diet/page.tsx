@@ -169,9 +169,9 @@ export default function DietPage() {
         }
       />
 
-      <div className="px-8 pt-7 pb-16">
+      <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-10 lg:pb-16">
         {/* Stat tiles */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-4 lg:mb-6">
           <StatTile
             label="Calories"
             num={totalToday > 0 ? totalToday.toLocaleString() : "—"}

@@ -295,8 +295,8 @@ export default function LearningPage() {
         }
       />
 
-      <div className="px-8 pt-7 pb-16">
-        <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-10 lg:pb-16">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-4 lg:mb-6">
           <StatTile label="Sessions" num={sessions.length} sub={<span>all time</span>} />
           <StatTile label="Hours logged" num={totalHours} unit="h" sub={<span>{totalMin % 60}min remainder</span>} />
           <StatTile label="Reading" num={booksReading} sub={<span>{books.length} books total</span>} />

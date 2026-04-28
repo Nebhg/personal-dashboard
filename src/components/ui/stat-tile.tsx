@@ -30,7 +30,7 @@ export function StatTile({
     <div
       className={cn(
         "bg-card border border-border rounded-[6px] overflow-hidden",
-        "flex flex-col gap-1.5 p-[18px] pb-4 cursor-pointer transition-colors",
+        "flex flex-col gap-1.5 p-3 sm:p-[18px] pb-3 sm:pb-4 cursor-pointer transition-colors",
         "hover:border-[oklch(1_0_0/0.12)]",
         className
       )}
@@ -52,7 +52,7 @@ export function StatTile({
         )}
       </div>
       <div className="leading-none">
-        <span className="mono text-[32px] font-[500] tracking-[-0.02em] text-foreground tabular-nums">
+        <span className="mono text-[26px] sm:text-[32px] font-[500] tracking-[-0.02em] text-foreground tabular-nums">
           {num}
         </span>
         {unit && (

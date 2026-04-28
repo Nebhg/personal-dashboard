@@ -99,7 +99,7 @@ export default function ExercisePage() {
                 New workout
               </AtlasBtn>
             </DialogTrigger>
-            <DialogContent className="w-[70vw] !max-w-none max-h-[70vh] overflow-y-auto">
+            <DialogContent className="w-full sm:w-[70vw] !max-w-none max-h-[80vh] sm:max-h-[70vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Create Workout</DialogTitle>
               </DialogHeader>
@@ -109,9 +109,9 @@ export default function ExercisePage() {
         }
       />
 
-      <div className="px-8 pt-7 pb-16">
+      <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-10 lg:pb-16">
         {/* Stat tiles */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-4 lg:mb-6">
           <StatTile
             label="Sessions · total"
             num={sessions.length}
@@ -161,7 +161,7 @@ export default function ExercisePage() {
 
           {/* Edit dialog */}
           <Dialog open={editPlanOpen} onOpenChange={setEditPlanOpen}>
-            <DialogContent className="w-[70vw] !max-w-none max-h-[70vh] overflow-y-auto">
+            <DialogContent className="w-full sm:w-[70vw] !max-w-none max-h-[80vh] sm:max-h-[70vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Edit Workout</DialogTitle>
               </DialogHeader>

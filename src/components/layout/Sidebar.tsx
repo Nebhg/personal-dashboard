@@ -14,6 +14,7 @@ import {
   TrendingUp,
   Wallet,
   BookOpen,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -79,7 +80,7 @@ function NavItem({
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: () => void }) {
   const pathname = usePathname();
   const [time, setTime] = useState("");
 
@@ -97,14 +98,28 @@ export function Sidebar() {
 
   return (
     <aside
-      className="fixed left-0 top-0 h-full w-[220px] flex flex-col z-20"
+      className={cn(
+        "fixed left-0 top-0 h-full w-[220px] flex flex-col z-40",
+        "transition-transform duration-200 ease-in-out",
+        open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+      )}
       style={{ borderRight: "1px solid var(--hairline, oklch(1 0 0 / 0.07))", background: "var(--sidebar)" }}
     >
       {/* Brand */}
       <div
-        className="px-6 pb-6 pt-7"
+        className="px-6 pb-6 pt-7 relative"
         style={{ borderBottom: "1px solid var(--hairline, oklch(1 0 0 / 0.07))" }}
       >
+        {/* Mobile close button */}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute right-3 top-3 lg:hidden flex items-center justify-center w-7 h-7 rounded-[4px] text-[var(--fg-3)] hover:text-foreground transition-colors"
+            aria-label="Close navigation"
+          >
+            <X style={{ width: 14, height: 14 }} />
+          </button>
+        )}
         <div className="flex items-center gap-[10px]">
           {/* Glyph: half-fill diagonal + inset border */}
           <div
