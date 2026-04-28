@@ -2,7 +2,6 @@
 
 import { Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useSidebar } from "@/components/layout/SidebarContext";
 
 interface TopbarProps {
   title: string;
@@ -11,27 +10,28 @@ interface TopbarProps {
   className?: string;
 }
 
-export function Topbar({ title, crumb, actions, className }: TopbarProps) {
-  const { toggle } = useSidebar();
+function toggleSidebar() {
+  document.dispatchEvent(new CustomEvent("atlas:toggle-sidebar"));
+}
 
+export function Topbar({ title, crumb, actions, className }: TopbarProps) {
   return (
     <div
       className={cn(
         "flex items-center justify-between px-4 lg:px-8 py-5",
-        "border-b border-border sticky top-0 z-10",
-        "bg-[color-mix(in_oklab,var(--background)_92%,transparent)] backdrop-blur-[8px]",
+        "border-b border-border sticky top-0 z-10 bg-background",
         className
       )}
     >
       <div className="flex items-center gap-3 min-w-0">
-        {/* Hamburger — inline in the topbar row, only on mobile */}
         <button
-          onClick={toggle}
-          className="lg:hidden shrink-0 flex items-center justify-center w-8 h-8 -ml-1 rounded-[4px] text-[var(--fg-2)] hover:text-foreground transition-colors"
-          aria-label="Open navigation"
           type="button"
+          onClick={toggleSidebar}
+          className="lg:hidden shrink-0 flex items-center justify-center rounded-[4px] text-[var(--fg-2)] hover:text-foreground transition-colors"
+          style={{ width: 44, height: 44, marginLeft: -10, touchAction: "manipulation" }}
+          aria-label="Open navigation"
         >
-          <Menu style={{ width: 16, height: 16 }} />
+          <Menu style={{ width: 18, height: 18 }} />
         </button>
 
         <div className="flex items-baseline gap-3 min-w-0">
