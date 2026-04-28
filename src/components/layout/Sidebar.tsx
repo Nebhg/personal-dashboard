@@ -100,8 +100,10 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
     <aside
       className={cn(
         "fixed left-0 top-0 h-full w-[220px] flex flex-col z-40",
-        "transition-transform duration-200 ease-in-out",
-        open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        "transition-all duration-200 ease-in-out",
+        "-translate-x-full",
+        "lg:translate-x-0",
+        open && "translate-x-0"
       )}
       style={{ borderRight: "1px solid var(--hairline, oklch(1 0 0 / 0.07))", background: "var(--sidebar)" }}
     >

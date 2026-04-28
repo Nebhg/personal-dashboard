@@ -14,7 +14,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div
         className={cn(
           "fixed inset-0 z-30 bg-black/60 lg:hidden transition-opacity duration-200",
-          sidebarOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+          "opacity-0 pointer-events-none",
+          sidebarOpen && "opacity-100 pointer-events-auto"
         )}
         onClick={() => setSidebarOpen(false)}
       />
