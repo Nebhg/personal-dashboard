@@ -20,15 +20,17 @@ export async function POST(req: NextRequest) {
 
     const application = await prisma.jobApplication.create({
       data: {
-        firm:        body.firm,
-        role:        body.role        ?? null,
-        stage:       body.stage       ?? "APPLIED",
-        appliedDate: body.appliedDate ?? null,
-        lastAction:  body.lastAction  ?? null,
-        nextAction:  body.nextAction  ?? null,
-        prepNeeded:  body.prepNeeded  ?? false,
-        prepNotes:   body.prepNotes   ?? null,
-        notes:       body.notes       ?? null,
+        firm:            body.firm,
+        role:            body.role            ?? null,
+        stage:           body.stage           ?? "APPLIED",
+        appliedDate:     body.appliedDate     ?? null,
+        lastAction:      body.lastAction      ?? null,
+        nextAction:      body.nextAction      ?? null,
+        prepNeeded:      body.prepNeeded      ?? false,
+        prepNotes:       body.prepNotes       ?? null,
+        notes:           body.notes           ?? null,
+        interviewStages: body.interviewStages ?? null,
+        currentStageIdx: body.currentStageIdx ?? 0,
       },
     });
 

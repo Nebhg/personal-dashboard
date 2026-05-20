@@ -33,15 +33,17 @@ interface Habit {
 }
 
 type CellStatus = "k" | "miss" | "default";
+type HeatmapCell = { status: CellStatus; date: string; dateLabel: string };
 
-function buildHeatmap(logs: HabitLog[], days = 30): CellStatus[] {
+function buildHeatmap(logs: HabitLog[], days = 30): HeatmapCell[] {
   const today = startOfDay(new Date());
   return Array.from({ length: days }, (_, i) => {
     const day    = subDays(today, days - 1 - i);
     const dayStr = format(day, "yyyy-MM-dd");
+    const dateLabel = format(day, "EEE d MMM");
     const log    = logs.find((l) => format(new Date(l.date), "yyyy-MM-dd") === dayStr);
-    if (!log)      return "default";
-    return log.kept ? "k" : "miss";
+    const status: CellStatus = !log ? "default" : log.kept ? "k" : "miss";
+    return { status, date: dayStr, dateLabel };
   });
 }
 
@@ -98,6 +100,17 @@ export default function HabitsPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ date: format(new Date(), "yyyy-MM-dd"), kept: !alreadyKept }),
+    });
+    load();
+  };
+
+  const handleCellClick = async (habitId: string, dateStr: string, currentStatus: CellStatus) => {
+    // Cycle: default → kept, kept → missed, missed → kept
+    const newKept = currentStatus !== "k";
+    await fetch(`/api/habits/${habitId}/logs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: dateStr, kept: newKept }),
     });
     load();
   };
@@ -198,21 +211,25 @@ export default function HabitsPage() {
                       </div>
                     </div>
 
-                    {/* Heatmap cells */}
+                    {/* Heatmap cells — click to toggle */}
                     <div
                       className="flex-1 grid gap-[2px]"
                       style={{ gridTemplateColumns: "repeat(30, 1fr)" }}
                     >
-                      {h.cells.map((status, i) => (
-                        <div
+                      {h.cells.map((cell, i) => (
+                        <button
                           key={i}
-                          className="rounded-[2px]"
+                          onClick={() => handleCellClick(h.id, cell.date, cell.status)}
+                          title={`${cell.dateLabel} — ${cell.status === "k" ? "Kept" : cell.status === "miss" ? "Missed" : "No log"} (click to toggle)`}
+                          className="rounded-[2px] cursor-pointer transition-all hover:ring-1 hover:ring-foreground/30 hover:scale-110"
                           style={{
                             height: 14,
+                            border: "none",
+                            padding: 0,
                             background:
-                              status === "k"
+                              cell.status === "k"
                                 ? "var(--primary)"
-                                : status === "miss"
+                                : cell.status === "miss"
                                 ? "oklch(0.30 0.04 25)"
                                 : "var(--muted)",
                           }}

@@ -10,10 +10,6 @@ interface TopbarProps {
   className?: string;
 }
 
-function toggleSidebar() {
-  document.dispatchEvent(new CustomEvent("atlas:toggle-sidebar"));
-}
-
 export function Topbar({ title, crumb, actions, className }: TopbarProps) {
   return (
     <div
@@ -24,16 +20,16 @@ export function Topbar({ title, crumb, actions, className }: TopbarProps) {
       )}
     >
       <div className="flex items-center gap-3 min-w-0">
+        {/* Hamburger — in normal document flow, safely below iOS gesture zones */}
         <button
           type="button"
-          onClick={toggleSidebar}
-          className="lg:hidden shrink-0 flex items-center justify-center rounded-[4px] text-[var(--fg-2)] hover:text-foreground transition-colors"
-          style={{ width: 44, height: 44, marginLeft: -10, touchAction: "manipulation" }}
+          onClick={() => document.dispatchEvent(new CustomEvent("atlas:sidebar-toggle"))}
+          className="lg:hidden flex items-center justify-center shrink-0 text-[var(--fg-2)] hover:text-foreground transition-colors"
+          style={{ width: 32, height: 32, touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
           aria-label="Open navigation"
         >
           <Menu style={{ width: 18, height: 18 }} />
         </button>
-
         <div className="flex items-baseline gap-3 min-w-0">
           <h1 className="text-[17px] lg:text-[18px] font-semibold tracking-[-0.01em] m-0 leading-none shrink-0">
             {title}

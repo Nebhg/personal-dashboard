@@ -13,7 +13,6 @@ import {
   Code2,
   TrendingUp,
   Wallet,
-  BookOpen,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -31,7 +30,6 @@ const TRACKING = [
   { href: "/leetcode",    label: "LeetCode",    icon: Code2 },
   { href: "/macro",       label: "Macro",       icon: TrendingUp },
   { href: "/investments", label: "Investments", icon: Wallet },
-  { href: "/learning",    label: "Learning",    icon: BookOpen },
 ];
 
 function NavItem({
@@ -80,9 +78,20 @@ function NavItem({
   );
 }
 
-export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: () => void }) {
+export function Sidebar() {
   const pathname = usePathname();
+  const [open, setOpen] = useState(false);
   const [time, setTime] = useState("");
+
+  const close = () => setOpen(false);
+
+  // Listen for toggle events dispatched by Topbar's hamburger button.
+  // Custom events bypass React context boundaries completely.
+  useEffect(() => {
+    const handler = () => setOpen((o) => !o);
+    document.addEventListener("atlas:sidebar-toggle", handler);
+    return () => document.removeEventListener("atlas:sidebar-toggle", handler);
+  }, []);
 
   useEffect(() => {
     const tick = () => {
@@ -93,19 +102,36 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
     return () => clearInterval(id);
   }, []);
 
+  // Close sidebar on navigation
+  useEffect(() => {
+    close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(href + "/");
 
   return (
+    <>
+      {/* Backdrop */}
+      {open && (
+        <div
+          className="fixed inset-0 z-30 lg:hidden"
+          style={{ background: "oklch(0 0 0 / 0.6)" }}
+          onClick={close}
+        />
+      )}
+
     <aside
       className={cn(
-        "fixed left-0 top-0 h-full w-[220px] flex flex-col z-40",
-        "transition-all duration-200 ease-in-out",
-        "-translate-x-full",
-        "lg:translate-x-0",
-        open && "translate-x-0"
+        "fixed left-0 top-0 h-full w-[220px] flex flex-col z-40 transition-transform duration-200 ease-in-out",
+        "lg:!translate-x-0",
+        open ? "translate-x-0" : "-translate-x-full"
       )}
-      style={{ borderRight: "1px solid var(--hairline, oklch(1 0 0 / 0.07))", background: "var(--sidebar)" }}
+      style={{
+        borderRight: "1px solid var(--hairline, oklch(1 0 0 / 0.07))",
+        background: "var(--sidebar)",
+      }}
     >
       {/* Brand */}
       <div
@@ -113,15 +139,14 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
         style={{ borderBottom: "1px solid var(--hairline, oklch(1 0 0 / 0.07))" }}
       >
         {/* Mobile close button */}
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="absolute right-3 top-3 lg:hidden flex items-center justify-center w-7 h-7 rounded-[4px] text-[var(--fg-3)] hover:text-foreground transition-colors"
-            aria-label="Close navigation"
-          >
-            <X style={{ width: 14, height: 14 }} />
-          </button>
-        )}
+        <button
+          onClick={close}
+          className="absolute right-3 top-3 lg:hidden flex items-center justify-center w-7 h-7 rounded-[4px] text-[var(--fg-3)] hover:text-foreground transition-colors"
+          style={{ touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
+          aria-label="Close navigation"
+        >
+          <X style={{ width: 14, height: 14 }} />
+        </button>
         <div className="flex items-center gap-[10px]">
           {/* Glyph: half-fill diagonal + inset border */}
           <div
@@ -190,5 +215,6 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
         </div>
       </div>
     </aside>
+    </>
   );
 }

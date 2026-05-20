@@ -24,7 +24,8 @@ import {
 import { TrendingUp, Plus, Trash2 } from "lucide-react";
 import { Topbar, AtlasBtn } from "@/components/ui/topbar";
 import { StatTile } from "@/components/ui/stat-tile";
-import { Panel, PanelHead, PanelTitle } from "@/components/ui/panel";
+import { Panel, PanelHead, PanelTitle, PanelBody } from "@/components/ui/panel";
+import { ActivityHeatmap, HeatmapDay } from "@/components/ui/activity-heatmap";
 
 const TRACKS = [
   { value: "1", label: "Track 1 — Options Pricing" },
@@ -200,6 +201,27 @@ export default function MacroPage() {
   const recallCount = topics.filter(t => t.level === "recall").length;
   const tracksActive = new Set(topics.map(t => t.track).filter(Boolean)).size;
 
+  // Build heatmap data (group by coveredAt date)
+  const byDate = new Map<string, Topic[]>();
+  for (const t of topics) {
+    const key = t.coveredAt.slice(0, 10);
+    if (!byDate.has(key)) byDate.set(key, []);
+    byDate.get(key)!.push(t);
+  }
+  const heatmapData: HeatmapDay[] = [...byDate.entries()].map(([date, dayTopics]) => ({
+    date,
+    count: dayTopics.length,
+    items: dayTopics.map((t) => ({ label: t.topic })),
+  }));
+
+  // Track distribution
+  const trackCounts = [1, 2, 3, 4, 5].map((n) => ({
+    track: n,
+    name: TRACK_NAMES[n],
+    count: (byTrack.get(n) ?? []).length,
+  })).filter((t) => t.count > 0);
+  const maxTrackCount = Math.max(1, ...trackCounts.map((t) => t.count));
+
   return (
     <>
       <Topbar
@@ -221,6 +243,49 @@ export default function MacroPage() {
             deltaDir="down"
           />
         </div>
+
+        {/* Activity heatmap */}
+        <Panel className="mb-4 lg:mb-6">
+          <PanelHead>
+            <PanelTitle>Activity · 13 weeks</PanelTitle>
+            <span className="label">{topics.length} topics</span>
+          </PanelHead>
+          <PanelBody>
+            <ActivityHeatmap data={heatmapData} days={91} />
+          </PanelBody>
+        </Panel>
+
+        {/* Track distribution */}
+        {trackCounts.length > 0 && (
+          <Panel className="mb-4 lg:mb-6">
+            <PanelHead>
+              <PanelTitle>Track distribution</PanelTitle>
+              <span className="label">{tracksActive} tracks active</span>
+            </PanelHead>
+            <PanelBody className="space-y-[9px]">
+              {trackCounts.map(({ track, name, count }) => (
+                <div key={track}>
+                  <div className="flex items-center justify-between mb-[5px]">
+                    <span className="text-[12px] text-foreground">Track {track} — {name}</span>
+                    <span className="mono text-[11px]" style={{ color: "var(--fg-3)" }}>{count}</span>
+                  </div>
+                  <div
+                    className="rounded-[2px] overflow-hidden"
+                    style={{ height: 4, background: "var(--muted)" }}
+                  >
+                    <div
+                      className="h-full rounded-[2px] transition-all"
+                      style={{
+                        width: `${(count / maxTrackCount) * 100}%`,
+                        background: "var(--primary)",
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </PanelBody>
+          </Panel>
+        )}
 
         {loading ? (
           <p className="text-muted-foreground text-sm">Loading…</p>

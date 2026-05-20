@@ -300,6 +300,10 @@ model JobApplication {
   notes           String?   // general notes
   cvPath          String?   // relative path e.g. "CVs/Ben_Haras-Gummer_GSS.pdf"
   coverLetterPath String?   // relative path e.g. "applications/GSS_cover_letter.md"
+  jobDescriptionPath String? // relative path e.g. "JDs/BofA_JD.md"
+  jobDescription  String?   // full JD text content (mirrors file for DB-level access)
+  interviewStages String?   // JSON: custom interview stages e.g. ["Phone Screen","Technical","System Design","Final"]
+  currentStageIdx Int       @default(0) // index into interviewStages array
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 }

@@ -135,9 +135,12 @@ export default async function DashboardPage() {
         }
       />
 
-      <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-10 lg:pb-16 max-w-[1400px]">
+      <div
+        className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-6 max-w-[1400px] flex flex-col"
+        style={{ minHeight: "calc(100vh - 56px)" }}
+      >
         {/* Row 1 — Stat tiles */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-3 lg:mb-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-3 lg:mb-4 shrink-0">
           <Link href="/diet">
             <StatTile
               label="Calories today"
@@ -217,10 +220,10 @@ export default async function DashboardPage() {
         </div>
 
         {/* Row 2 — Today schedule + Habits today */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-4 mb-3 lg:mb-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-4 mb-3 lg:mb-4 flex-1 min-h-0">
           {/* Today schedule — 7 cols */}
-          <div className="lg:col-span-7">
-            <Panel>
+          <div className="lg:col-span-7 flex flex-col">
+            <Panel className="flex-1 flex flex-col">
               <PanelHead>
                 <PanelTitle>{"Today's schedule"}</PanelTitle>
                 <div className="flex items-center gap-3">
@@ -234,9 +237,9 @@ export default async function DashboardPage() {
                 </div>
               </PanelHead>
               {todayEvents.length === 0 ? (
-                <div className="px-4 py-8 text-center label">No events today</div>
+                <div className="px-4 py-8 text-center label flex-1 flex items-center justify-center">No events today</div>
               ) : (
-                <div>
+                <div className="flex-1 overflow-y-auto">
                   {todayEvents.map((e) => (
                     <div
                       key={e.id}
@@ -267,8 +270,8 @@ export default async function DashboardPage() {
           </div>
 
           {/* Habits today — 5 cols */}
-          <div className="lg:col-span-5">
-            <Panel>
+          <div className="lg:col-span-5 flex flex-col">
+            <Panel className="flex-1 flex flex-col">
               <PanelHead>
                 <PanelTitle>{"Habits · today"}</PanelTitle>
                 <span className="mono text-[11px]" style={{ color: "var(--fg-2)" }}>
@@ -327,10 +330,10 @@ export default async function DashboardPage() {
         </div>
 
         {/* Row 3 — Macros + This week */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-4 flex-1 min-h-0">
           {/* Macros · today — 6 cols */}
-          <div className="lg:col-span-6">
-            <Panel>
+          <div className="lg:col-span-6 flex flex-col">
+            <Panel className="flex-1">
               <PanelHead>
                 <PanelTitle>{"Macros · today"}</PanelTitle>
                 <span className="label num">
@@ -372,8 +375,8 @@ export default async function DashboardPage() {
           </div>
 
           {/* This week — 6 cols */}
-          <div className="lg:col-span-6">
-            <Panel>
+          <div className="lg:col-span-6 flex flex-col">
+            <Panel className="flex-1">
               <PanelHead>
                 <PanelTitle>This week</PanelTitle>
                 <span className="label">

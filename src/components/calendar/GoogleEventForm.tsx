@@ -14,6 +14,11 @@ export type GoogleEventFormData = {
   description: string;
   location: string;
   colorId: string;
+  isRecurring: boolean;
+  recurrenceFreq: string;   // DAILY | WEEKLY | MONTHLY | YEARLY
+  recurrenceInterval: number;
+  recurrenceDays: number[];  // 0=Sun..6=Sat for WEEKLY
+  recurrenceEnd: string;     // date string or empty
 };
 
 interface Props {
@@ -46,6 +51,11 @@ export function GoogleEventForm({ initialStart, initialEnd, initialData, onSucce
     description: initialData?.description ?? "",
     location:    initialData?.location    ?? "",
     colorId:     initialData?.colorId     ?? "",
+    isRecurring: false,
+    recurrenceFreq: "WEEKLY",
+    recurrenceInterval: 1,
+    recurrenceDays: [],
+    recurrenceEnd: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +73,22 @@ export function GoogleEventForm({ initialStart, initialEnd, initialData, onSucce
       return new Date(local).toISOString();
     };
 
+    // Build recurrence rule if recurring
+    let recurrence: string[] | undefined;
+    if (form.isRecurring && !isEdit) {
+      const GCAL_DAYS = ["SU","MO","TU","WE","TH","FR","SA"];
+      let rule = `RRULE:FREQ=${form.recurrenceFreq}`;
+      if (form.recurrenceInterval > 1) rule += `;INTERVAL=${form.recurrenceInterval}`;
+      if (form.recurrenceFreq === "WEEKLY" && form.recurrenceDays.length > 0) {
+        rule += `;BYDAY=${form.recurrenceDays.map(d => GCAL_DAYS[d]).join(",")}`;
+      }
+      if (form.recurrenceEnd) {
+        const until = new Date(form.recurrenceEnd + "T23:59:59Z").toISOString().replace(/[-:.]/g, "").slice(0, 15) + "Z";
+        rule += `;UNTIL=${until}`;
+      }
+      recurrence = [rule];
+    }
+
     const payload = {
       title:       form.title,
       start:       toISO(form.start, form.allDay),
@@ -72,6 +98,7 @@ export function GoogleEventForm({ initialStart, initialEnd, initialData, onSucce
       location:    form.location    || undefined,
       colorId:     form.colorId     || undefined,
       calendarId:  initialData?.calendarId,
+      recurrence,
     };
 
     try {
@@ -154,6 +181,77 @@ export function GoogleEventForm({ initialStart, initialEnd, initialData, onSucce
         rows={2}
         className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
       />
+
+      {/* Recurring toggle */}
+      {!isEdit && (
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={form.isRecurring}
+              onChange={(e) => setForm({ ...form, isRecurring: e.target.checked })}
+              className="rounded"
+            />
+            Recurring event
+          </label>
+          {form.isRecurring && (
+            <div className="space-y-2 pl-6">
+              <div className="flex gap-2 items-center">
+                <span className="text-xs text-muted-foreground">Every</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={52}
+                  value={form.recurrenceInterval}
+                  onChange={(e) => setForm({ ...form, recurrenceInterval: parseInt(e.target.value) || 1 })}
+                  className="w-16"
+                />
+                <select
+                  value={form.recurrenceFreq}
+                  onChange={(e) => setForm({ ...form, recurrenceFreq: e.target.value })}
+                  className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                >
+                  <option value="DAILY">day(s)</option>
+                  <option value="WEEKLY">week(s)</option>
+                  <option value="MONTHLY">month(s)</option>
+                  <option value="YEARLY">year(s)</option>
+                </select>
+              </div>
+              {form.recurrenceFreq === "WEEKLY" && (
+                <div className="flex gap-1">
+                  {["Su","Mo","Tu","We","Th","Fr","Sa"].map((d, i) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => {
+                        const days = form.recurrenceDays.includes(i)
+                          ? form.recurrenceDays.filter(x => x !== i)
+                          : [...form.recurrenceDays, i];
+                        setForm({ ...form, recurrenceDays: days });
+                      }}
+                      className="w-8 h-8 rounded text-xs font-medium transition-colors"
+                      style={{
+                        background: form.recurrenceDays.includes(i) ? "var(--primary)" : "var(--muted)",
+                        color: form.recurrenceDays.includes(i) ? "var(--primary-foreground)" : "var(--fg-2)",
+                      }}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Ends (optional)</p>
+                <Input
+                  type="date"
+                  value={form.recurrenceEnd}
+                  onChange={(e) => setForm({ ...form, recurrenceEnd: e.target.value })}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Color picker */}
       <div>

@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { listEvents, createEvent, PRIMARY_CALENDAR } from "@/lib/google-calendar";
 
 export async function GET(req: NextRequest) {
+  // Return empty list gracefully if Google Calendar is not configured
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REFRESH_TOKEN) {
+    return NextResponse.json([]);
+  }
   const { searchParams } = new URL(req.url);
   const from = new Date(searchParams.get("from") ?? Date.now());
   const to   = new Date(searchParams.get("to")   ?? Date.now() + 30 * 864e5);
@@ -15,6 +19,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REFRESH_TOKEN) {
+    return NextResponse.json({ error: "Google Calendar not configured" }, { status: 503 });
+  }
   const body = await req.json();
   const calendarId = body.calendarId ?? PRIMARY_CALENDAR;
   try {

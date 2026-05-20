@@ -12,6 +12,7 @@ export type HabitFormValues = z.infer<typeof habitSchema>;
 
 export const habitLogSchema = z.object({
   kept: z.boolean(),
+  date: z.string().optional(),  // ISO date string for retroactive logging
   notes: z.string().optional().nullable(),
 });
 
