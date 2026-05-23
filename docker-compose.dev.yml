@@ -1,0 +1,25 @@
+services:
+  dashboard:
+    build:
+      context: .
+      target: builder          # stop at the build stage — no prod runner needed
+    command: >
+      sh -c "npx prisma migrate deploy && npm run dev"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./prisma:/data
+      - ./src:/app/src          # live source — edits appear instantly
+      - ./public:/app/public
+      # keep node_modules and .next from the image, don't overwrite with host
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - DATABASE_URL=file:///data/dev.db
+      - NODE_ENV=development
+      - DISPATCHER_URL=http://dispatcher:8765
+      - DISPATCHER_PROJECT=life-of-ben
+      - AI_PROVIDER=claude
+    env_file:
+      - .env.local
+    restart: unless-stopped

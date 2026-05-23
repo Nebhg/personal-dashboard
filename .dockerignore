@@ -1,0 +1,22 @@
+node_modules
+.next
+.git
+.gitignore
+.env.local
+*.log
+npm-debug.log*
+
+# SQLite DB files — persisted via Docker volume instead
+prisma/dev.db
+prisma/dev.db-journal
+prisma/dev.db-wal
+prisma/dev.db-shm
+
+# Dev/local only
+scripts/
+mcp-server/
+.claude/
+README.md
+CLAUDE.md
+.DS_Store
+*.tsbuildinfo

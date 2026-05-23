@@ -1,0 +1,53 @@
+services:
+  dashboard:
+    build: .
+    container_name: personal-dashboard
+    ports:
+      - "3000:3000"
+    volumes:
+      # Bind-mount the prisma dir so the dispatcher container (and host) can
+      # still read dev.db at its original location on disk.
+      - ./prisma:/data
+    environment:
+      - DATABASE_URL=file:///data/dev.db
+      - NODE_ENV=production
+      # Dispatcher is a sibling service — use Docker's internal DNS name
+      - DISPATCHER_URL=http://dispatcher:8765
+      - DISPATCHER_PROJECT=life-of-ben
+      - AI_PROVIDER=claude
+    env_file:
+      # Loads ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_* credentials
+      - .env.local
+    restart: unless-stopped
+
+  dispatcher:
+    build:
+      context: ../claude-dispatcher
+    container_name: claude-dispatcher
+    ports:
+      - "8765:8765"
+    volumes:
+      # Claude CLI auth — must match whatever account you're logged in as on host
+      - /Users/haras-gummer/.claude:/root/.claude
+      # Project root (contains symlinks — the targets below must also be mounted)
+      - /Users/haras-gummer/claude_projects:/claude_projects:ro
+      # Symlink targets — mounted at the same absolute path so symlinks resolve inside the container
+      - /Users/haras-gummer/career_tracker:/Users/haras-gummer/career_tracker:ro
+      - /Users/haras-gummer/leetcode:/Users/haras-gummer/leetcode:ro
+      - "/Users/haras-gummer/macro learning:/Users/haras-gummer/macro learning:ro"
+      - /Users/haras-gummer/Documents/Claude/Projects:/Users/haras-gummer/Documents/Claude/Projects:ro
+      # Shared dashboard DB — same bind-mounted prisma dir as the dashboard
+      - ./prisma:/dashboard-data:ro
+      # Persist dispatcher's own jobs.db across restarts
+      - dispatcher_data:/var/dispatcher
+    environment:
+      - PROJECT_ROOT=/claude_projects
+      - DASHBOARD_DB_PATH=/dashboard-data/dev.db
+      - DB_PATH=/var/dispatcher/jobs.db
+      # Tailscale IP used in push-notification deep-links — update if your IP changes
+      - WEBAPP_URL=http://100.111.119.3:8765
+    restart: unless-stopped
+
+volumes:
+  dispatcher_data:
+    name: claude-dispatcher-data
