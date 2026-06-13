@@ -17,6 +17,8 @@ services:
     environment:
       - DATABASE_URL=file:///data/dev.db
       - NODE_ENV=development
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
       - DISPATCHER_URL=http://dispatcher:8765
       - DISPATCHER_PROJECT=life-of-ben
       - AI_PROVIDER=claude

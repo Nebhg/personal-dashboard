@@ -417,7 +417,7 @@ export default function CareerPage() {
   const dragAppRef = useRef<Application | null>(null);
 
   useEffect(() => {
-    fetch("/api/career").then((r) => r.json()).then((data) => { setApps(data); setLoading(false); });
+    fetch("/api/career", { cache: "no-store" }).then((r) => r.json()).then((data) => { setApps(data); setLoading(false); });
   }, []);
 
   const active = apps.filter((a) => BOARD_STAGES.includes(a.stage));

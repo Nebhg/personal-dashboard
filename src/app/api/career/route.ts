@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, createFreshPrismaClient } from "@/lib/prisma";
 import { regenerateTrackerMd } from "@/lib/career-sync";
 
 export async function GET() {
-  const applications = await prisma.jobApplication.findMany({
-    orderBy: { updatedAt: "desc" },
-  });
-  return NextResponse.json(applications);
+  // Use a fresh client so MCP writes are visible without restarting the container
+  const client = createFreshPrismaClient();
+  try {
+    const applications = await client.jobApplication.findMany({
+      orderBy: { updatedAt: "desc" },
+    });
+    return NextResponse.json(applications);
+  } finally {
+    await client.$disconnect();
+  }
 }
 
 export async function POST(req: NextRequest) {

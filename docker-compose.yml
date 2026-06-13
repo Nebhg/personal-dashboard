@@ -1,16 +1,28 @@
 services:
   dashboard:
-    build: .
+    build:
+      context: .
+      target: builder
     container_name: personal-dashboard
+    command: >
+      sh -c "npx prisma migrate deploy && npm run dev"
     ports:
       - "3000:3000"
     volumes:
       # Bind-mount the prisma dir so the dispatcher container (and host) can
       # still read dev.db at its original location on disk.
       - ./prisma:/data
+      # Live source mounts — edits appear instantly without rebuilding
+      - ./src:/app/src
+      - ./public:/app/public
+      # Keep node_modules and .next from the image, don't overwrite with host
+      - /app/node_modules
+      - /app/.next
     environment:
       - DATABASE_URL=file:///data/dev.db
-      - NODE_ENV=production
+      - NODE_ENV=development
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
       # Dispatcher is a sibling service — use Docker's internal DNS name
       - DISPATCHER_URL=http://dispatcher:8765
       - DISPATCHER_PROJECT=life-of-ben

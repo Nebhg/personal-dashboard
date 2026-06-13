@@ -11,6 +11,12 @@ function createPrismaClient() {
   return new PrismaClient({ adapter });
 }
 
+// Creates a short-lived client for routes that need to see external writes
+// (e.g. MCP server updates) without restarting the container.
+export function createFreshPrismaClient() {
+  return createPrismaClient();
+}
+
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
