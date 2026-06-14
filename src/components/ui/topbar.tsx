@@ -14,7 +14,7 @@ export function Topbar({ title, crumb, actions, className }: TopbarProps) {
   return (
     <div
       className={cn(
-        "flex items-center justify-between px-4 lg:px-8 py-5",
+        "flex items-center justify-between px-4 lg:px-8 py-1.5",
         "border-b border-border sticky top-0 z-10 bg-background",
         className
       )}
