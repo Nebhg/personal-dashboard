@@ -209,6 +209,7 @@ export function WeekView({ weekStart, today, events, onSelectEvent, onSelectSlot
                     }}
                   >
                     <div
+                      suppressHydrationWarning
                       style={{
                         fontFamily: "var(--font-jetbrains-mono, monospace)",
                         fontSize: 9,

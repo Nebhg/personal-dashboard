@@ -20,6 +20,9 @@ import { cn } from "@/lib/utils";
 const WORKSPACE = [
   { href: "/dashboard",   label: "Dashboard", icon: LayoutDashboard },
   { href: "/calendar",    label: "Calendar",  icon: Calendar },
+];
+
+const WELLBEING = [
   { href: "/habits",      label: "Habits",    icon: Target },
   { href: "/diet",        label: "Diet",      icon: Utensils },
   { href: "/exercise",    label: "Exercise",  icon: Dumbbell },
@@ -184,6 +187,14 @@ export function Sidebar() {
           <div className="label px-3 pb-1.5">Workspace</div>
           <div className="space-y-px">
             {WORKSPACE.map((item) => (
+              <NavItem key={item.href} {...item} active={isActive(item.href)} />
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="label px-3 pb-1.5">Wellbeing</div>
+          <div className="space-y-px">
+            {WELLBEING.map((item) => (
               <NavItem key={item.href} {...item} active={isActive(item.href)} />
             ))}
           </div>
