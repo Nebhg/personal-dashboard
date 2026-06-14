@@ -15,7 +15,11 @@ import {
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { type CalendarEventDTO, AREA_COLORS, AREA_LABELS } from "@/types";
 import { GoogleEventForm } from "@/components/calendar/GoogleEventForm";
-import { Pencil, Trash2 } from "lucide-react";
+import { WorkoutPlanForm } from "@/components/exercise/WorkoutPlanForm";
+import { RecurringBlockEditForm } from "@/components/calendar/RecurringBlockEditForm";
+import { type WorkoutPlanFormValues } from "@/lib/validations/exercise";
+import { type RecurringBlockFormValues } from "@/lib/validations/recurring-block";
+import { Pencil, Trash2, RefreshCw, AlertTriangle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -129,6 +133,19 @@ export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
   // Detail view
   const [selectedEvent, setSelectedEvent] = useState<InternalEvent | null>(null);
   const [deleting, setDeleting]           = useState(false);
+  const [syncing, setSyncing]             = useState(false);
+  const [deletingAll, setDeletingAll]     = useState(false);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+
+  // Recurring event edit dialog
+  type RecurringEditState = {
+    type: "wp" | "rb";
+    entityId: string;
+    wpData?: WorkoutPlanFormValues;
+    rbData?: RecurringBlockFormValues;
+  };
+  const [recurringEdit, setRecurringEdit] = useState<RecurringEditState | null>(null);
+  const [loadingEdit, setLoadingEdit]     = useState(false);
 
   // ── Data fetching ─────────────────────────────────────────────────────────
 
@@ -194,13 +211,87 @@ export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
   }, [view, date, fetchRange]);
 
   const handleDeleteEvent = useCallback(async (event: InternalEvent) => {
-    if (!event.isGoogleEvent) return;
     setDeleting(true);
+    if (event.isGoogleEvent) {
+      await fetch(
+        `/api/google-calendar/events/${event.id}?calendarId=${event.calendarId ?? "primary"}`,
+        { method: "DELETE" }
+      );
+    } else {
+      await fetch(`/api/calendar/${event.id}`, { method: "DELETE" });
+    }
+    setDeleting(false);
+    setSelectedEvent(null);
+    handleFormSuccess();
+  }, [handleFormSuccess]);
+
+  // ISO timestamps in virtual event IDs are always 24 chars: "2026-06-01T19:00:00.000Z"
+  const extractVirtualId = (id: string, prefix: "wp" | "rb") =>
+    id.slice(prefix.length + 1, -25);
+
+  const handleResyncEvent = useCallback(async (event: InternalEvent) => {
+    setSyncing(true);
+    if (event.id.startsWith("wp-")) {
+      const planId = extractVirtualId(event.id, "wp");
+      await fetch(`/api/exercise/plans/${planId}/sync`, { method: "POST" });
+    } else if (event.id.startsWith("rb-")) {
+      const blockId = extractVirtualId(event.id, "rb");
+      await fetch(`/api/schedule/recurring/${blockId}/sync`, { method: "POST" });
+    }
+    setSyncing(false);
+    setSelectedEvent(null);
+    handleFormSuccess();
+  }, [handleFormSuccess]);
+
+  const handleEditRecurring = useCallback(async (event: InternalEvent) => {
+    const isWp = event.id.startsWith("wp-");
+    const entityId = extractVirtualId(event.id, isWp ? "wp" : "rb");
+    setLoadingEdit(true);
+    if (isWp) {
+      const res = await fetch(`/api/exercise/plans/${entityId}`);
+      const plan = await res.json();
+      setRecurringEdit({
+        type: "wp",
+        entityId,
+        wpData: {
+          name: plan.name,
+          description: plan.description ?? "",
+          scheduledDays: JSON.parse(plan.scheduledDays),
+          scheduledTime: plan.scheduledTime ?? null,
+          exercises: plan.exercises,
+        },
+      });
+    } else {
+      const res = await fetch(`/api/schedule/recurring/${entityId}`);
+      const block = await res.json();
+      setRecurringEdit({
+        type: "rb",
+        entityId,
+        rbData: {
+          title: block.title,
+          category: block.category,
+          startTime: block.startTime,
+          endTime: block.endTime,
+          daysOfWeek: JSON.parse(block.daysOfWeek),
+          endsOn: block.endsOn ? new Date(block.endsOn) : null,
+          notes: block.notes ?? null,
+        },
+      });
+    }
+    setLoadingEdit(false);
+    setSelectedEvent(null);
+  }, []);
+
+  const handleDeleteAll = useCallback(async (event: InternalEvent) => {
+    setDeletingAll(true);
+    const isWp = event.id.startsWith("wp-");
+    const entityId = extractVirtualId(event.id, isWp ? "wp" : "rb");
     await fetch(
-      `/api/google-calendar/events/${event.id}?calendarId=${event.calendarId ?? "primary"}`,
+      isWp ? `/api/exercise/plans/${entityId}` : `/api/schedule/recurring/${entityId}`,
       { method: "DELETE" }
     );
-    setDeleting(false);
+    setDeletingAll(false);
+    setConfirmDeleteAll(false);
     setSelectedEvent(null);
     handleFormSuccess();
   }, [handleFormSuccess]);
@@ -475,7 +566,7 @@ export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
       {/* Event detail dialog */}
       <Dialog
         open={!!selectedEvent && !createOpen}
-        onOpenChange={(o) => { if (!o) setSelectedEvent(null); }}
+        onOpenChange={(o) => { if (!o) { setSelectedEvent(null); setConfirmDeleteAll(false); } }}
       >
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -518,6 +609,7 @@ export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
               {selectedEvent.description && (
                 <p className="text-muted-foreground">{selectedEvent.description}</p>
               )}
+              {/* Google Calendar events: edit + delete */}
               {selectedEvent.isGoogleEvent && (
                 <div className="flex gap-2 pt-2">
                   <Button
@@ -544,7 +636,118 @@ export function CalendarView({ initialEvents, initialWfhDates = [] }: Props) {
                   </Button>
                 </div>
               )}
+              {/* Stored domain events (logged workouts, meals, etc.): delete */}
+              {!selectedEvent.isGoogleEvent && !selectedEvent.isRecurring && (
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="flex-1"
+                    disabled={deleting}
+                    onClick={() => handleDeleteEvent(selectedEvent)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                    {deleting ? "Deleting…" : "Delete"}
+                  </Button>
+                </div>
+              )}
+              {/* Virtual recurring events (workout plans, recurring blocks) */}
+              {!selectedEvent.isGoogleEvent && selectedEvent.isRecurring &&
+               (selectedEvent.id.startsWith("wp-") || selectedEvent.id.startsWith("rb-")) && (
+                <div className="pt-2 space-y-2">
+                  {!confirmDeleteAll ? (
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1"
+                        disabled={loadingEdit}
+                        onClick={() => handleEditRecurring(selectedEvent)}
+                      >
+                        <Pencil className="h-3.5 w-3.5 mr-1" />
+                        {loadingEdit ? "Loading…" : "Edit"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1"
+                        disabled={syncing}
+                        onClick={() => handleResyncEvent(selectedEvent)}
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 mr-1 ${syncing ? "animate-spin" : ""}`} />
+                        {syncing ? "Syncing…" : "Sync to GCal"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="flex-1"
+                        onClick={() => setConfirmDeleteAll(true)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1" />
+                        Delete all
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-2">
+                      <p className="text-xs flex items-center gap-1.5 text-destructive font-medium">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                        Delete all occurrences of this recurring event?
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        This removes the {selectedEvent.id.startsWith("wp-") ? "workout plan" : "recurring block"} and its Google Calendar series permanently.
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1"
+                          onClick={() => setConfirmDeleteAll(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="flex-1"
+                          disabled={deletingAll}
+                          onClick={() => handleDeleteAll(selectedEvent)}
+                        >
+                          {deletingAll ? "Deleting…" : "Yes, delete all"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Recurring event edit dialog */}
+      <Dialog
+        open={!!recurringEdit}
+        onOpenChange={(o) => { if (!o) setRecurringEdit(null); }}
+      >
+        <DialogContent className={recurringEdit?.type === "wp" ? "max-w-3xl" : "max-w-md"}>
+          <DialogHeader>
+            <DialogTitle>
+              {recurringEdit?.type === "wp" ? "Edit workout plan" : "Edit recurring event"}
+            </DialogTitle>
+          </DialogHeader>
+          {recurringEdit?.type === "wp" && recurringEdit.wpData && (
+            <WorkoutPlanForm
+              planId={recurringEdit.entityId}
+              initialValues={recurringEdit.wpData}
+              onSuccess={() => { setRecurringEdit(null); handleFormSuccess(); }}
+            />
+          )}
+          {recurringEdit?.type === "rb" && recurringEdit.rbData && (
+            <RecurringBlockEditForm
+              blockId={recurringEdit.entityId}
+              initialValues={recurringEdit.rbData}
+              onSuccess={() => { setRecurringEdit(null); handleFormSuccess(); }}
+            />
           )}
         </DialogContent>
       </Dialog>

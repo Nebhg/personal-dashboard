@@ -4,6 +4,16 @@ import { recurringBlockSchema } from "@/lib/validations/recurring-block";
 import { SCHEDULE_CATEGORIES } from "@/types";
 import { pushRecurringBlockToGCal, syncDeleteFromGCal } from "@/lib/gcal-sync";
 
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const block = await prisma.recurringBlock.findUnique({ where: { id } });
+  if (!block) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json(block);
+}
+
 export async function PUT(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
