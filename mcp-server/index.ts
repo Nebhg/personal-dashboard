@@ -1,5 +1,10 @@
 import * as dotenv from "dotenv";
 import * as path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 // Load .env.local first (dashboard OAuth creds), then .env as fallback
 dotenv.config({ path: path.join(__dirname, "../.env.local") });
 dotenv.config({ path: path.join(__dirname, "../.env") });
@@ -40,6 +45,7 @@ async function regenerateTrackerMd(): Promise<void> {
       sections.push(`- **Next action:** ${a.nextAction ?? "—"}`);
       sections.push(`- **Prep needed:** ${a.prepNeeded ? "YES" : "NO"}${a.prepNotes ? ` — ${a.prepNotes}` : ""}`);
       sections.push(`- **Notes:** ${a.notes ?? "—"}`);
+      sections.push(`- **Job Description:** ${a.jobDescriptionPath ?? "[Paste JD here if progressed]"}`);
       sections.push("", "---", "");
     }
 
@@ -69,6 +75,22 @@ async function regenerateTrackerMd(): Promise<void> {
 
 const dbUrl = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
 const db = createClient({ url: dbUrl });
+
+// ─── STARTUP MIGRATIONS ───────────────────────────────────────────────────────
+// Safely add new columns that may not exist in older DB snapshots.
+async function runStartupMigrations(): Promise<void> {
+  const alterIfMissing = async (table: string, column: string, type: string) => {
+    try {
+      await db.execute(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${type}`);
+      console.error(`[migration] Added ${table}.${column}`);
+    } catch {
+      // Column already exists — expected on subsequent starts
+    }
+  };
+  await alterIfMissing("JobApplication", "jobDescriptionPath", "TEXT");
+  await alterIfMissing("JobApplication", "jobDescription", "TEXT");
+}
+runStartupMigrations().catch((e) => console.error("[migration] startup error:", e));
 
 function uid(): string {
   return randomUUID();
@@ -946,25 +968,31 @@ server.tool(
 
 server.tool(
   "add_application",
-  "Add a new job application to the career pipeline.",
+  "Add a new job application to the career pipeline. IMPORTANT: jobDescription is REQUIRED — always ask the user to provide the full JD text before calling this tool. Do not create an application without it.",
   {
-    firm:        z.string().describe("Company name e.g. 'B2C2'"),
-    role:        z.string().optional().describe("Role title e.g. 'Quant Developer'"),
-    stage:       z.enum(["APPLIED","SCREEN","TECHNICAL","FINAL","OFFER","REJECTED","GHOSTED"]).optional().describe("Current stage, defaults to APPLIED"),
-    appliedDate: z.string().optional().describe("Date applied in YYYY-MM-DD format"),
-    lastAction:  z.string().optional().describe("Description of last action taken"),
-    nextAction:  z.string().optional().describe("Description of next action needed"),
-    prepNeeded:  z.boolean().optional().describe("Whether prep is needed for next stage"),
-    prepNotes:   z.string().optional().describe("What specifically to prepare"),
-    notes:       z.string().optional().describe("General notes about this application"),
+    firm:                z.string().describe("Company name e.g. 'B2C2'"),
+    role:                z.string().optional().describe("Role title e.g. 'Quant Developer'"),
+    stage:               z.enum(["APPLIED","SCREEN","TECHNICAL","FINAL","OFFER","REJECTED","GHOSTED"]).optional().describe("Current stage, defaults to APPLIED"),
+    appliedDate:         z.string().optional().describe("Date applied in YYYY-MM-DD format"),
+    lastAction:          z.string().optional().describe("Description of last action taken"),
+    nextAction:          z.string().optional().describe("Description of next action needed"),
+    prepNeeded:          z.boolean().optional().describe("Whether prep is needed for next stage"),
+    prepNotes:           z.string().optional().describe("What specifically to prepare"),
+    notes:               z.string().optional().describe("General notes about this application"),
+    jobDescriptionPath:  z.string().optional().describe("Relative path to JD markdown file e.g. 'JDs/BofA_JD.md'"),
+    jobDescription:      z.string().describe("REQUIRED: Full text of the job description. Do not call this tool without it."),
   },
-  async ({ firm, role, stage, appliedDate, lastAction, nextAction, prepNeeded, prepNotes, notes }) => {
+  async ({ firm, role, stage, appliedDate, lastAction, nextAction, prepNeeded, prepNotes, notes, jobDescriptionPath, jobDescription }) => {
+    // JD is required — guard against empty string being passed
+    if (!jobDescription || jobDescription.trim().length < 50) {
+      return { content: [{ type: "text" as const, text: `❌ Cannot add application without a job description. Please provide the full JD text for ${firm} before creating this entry. Paste the JD, then call add_application again with jobDescription set.` }] };
+    }
     const isoNow = new Date().toISOString();
     const id = uid();
     const isoApplied = appliedDate ? new Date(appliedDate + "T00:00:00.000Z").toISOString() : null;
     await db.execute({
-      sql: `INSERT INTO "JobApplication" (id, firm, role, stage, appliedDate, lastAction, nextAction, prepNeeded, prepNotes, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [id, firm, role ?? null, stage ?? "APPLIED", isoApplied, lastAction ?? null, nextAction ?? null, prepNeeded ? 1 : 0, prepNotes ?? null, notes ?? null, isoNow, isoNow],
+      sql: `INSERT INTO "JobApplication" (id, firm, role, stage, appliedDate, lastAction, nextAction, prepNeeded, prepNotes, notes, jobDescriptionPath, jobDescription, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, firm, role ?? null, stage ?? "APPLIED", isoApplied, lastAction ?? null, nextAction ?? null, prepNeeded ? 1 : 0, prepNotes ?? null, notes ?? null, jobDescriptionPath ?? null, jobDescription ?? null, isoNow, isoNow],
     });
     await regenerateTrackerMd();
     return { content: [{ type: "text" as const, text: `Added ${firm}${role ? ` — ${role}` : ""} at stage ${stage ?? "APPLIED"}. tracker.md updated.` }] };
@@ -973,17 +1001,19 @@ server.tool(
 
 server.tool(
   "update_application",
-  "Update an existing job application — change stage, log an action, set next steps, flag prep needed.",
+  "Update an existing job application — change stage, log an action, set next steps, flag prep needed, or attach a job description.",
   {
-    firm:       z.string().describe("Firm name to identify the application (partial match, case-insensitive)"),
-    stage:      z.enum(["APPLIED","SCREEN","TECHNICAL","FINAL","OFFER","REJECTED","GHOSTED"]).optional(),
-    lastAction: z.string().optional().describe("What just happened e.g. 'HackerRank completed 2026-04-21'"),
-    nextAction: z.string().optional().describe("What needs to happen next"),
-    prepNeeded: z.boolean().optional(),
-    prepNotes:  z.string().optional(),
-    notes:      z.string().optional(),
+    firm:               z.string().describe("Firm name to identify the application (partial match, case-insensitive)"),
+    stage:              z.enum(["APPLIED","SCREEN","TECHNICAL","FINAL","OFFER","REJECTED","GHOSTED"]).optional(),
+    lastAction:         z.string().optional().describe("What just happened e.g. 'HackerRank completed 2026-04-21'"),
+    nextAction:         z.string().optional().describe("What needs to happen next"),
+    prepNeeded:         z.boolean().optional(),
+    prepNotes:          z.string().optional(),
+    notes:              z.string().optional(),
+    jobDescriptionPath: z.string().optional().describe("Relative path to JD markdown file e.g. 'JDs/BofA_JD.md'"),
+    jobDescription:     z.string().optional().describe("Full text of the job description"),
   },
-  async ({ firm, stage, lastAction, nextAction, prepNeeded, prepNotes, notes }) => {
+  async ({ firm, stage, lastAction, nextAction, prepNeeded, prepNotes, notes, jobDescriptionPath, jobDescription }) => {
     const existing = await db.execute({
       sql: `SELECT id, firm, role FROM "JobApplication" WHERE firm LIKE ? ORDER BY updatedAt DESC LIMIT 1`,
       args: [`%${firm}%`],
@@ -995,12 +1025,14 @@ server.tool(
     const isoNow = new Date().toISOString();
     const updates: string[] = ["updatedAt = ?"];
     const args: InValue[] = [isoNow];
-    if (stage      !== undefined) { updates.push("stage = ?");      args.push(stage); }
-    if (lastAction !== undefined) { updates.push("lastAction = ?"); args.push(lastAction); }
-    if (nextAction !== undefined) { updates.push("nextAction = ?"); args.push(nextAction); }
-    if (prepNeeded !== undefined) { updates.push("prepNeeded = ?"); args.push(prepNeeded ? 1 : 0); }
-    if (prepNotes  !== undefined) { updates.push("prepNotes = ?");  args.push(prepNotes ?? null); }
-    if (notes      !== undefined) { updates.push("notes = ?");      args.push(notes ?? null); }
+    if (stage               !== undefined) { updates.push("stage = ?");               args.push(stage); }
+    if (lastAction          !== undefined) { updates.push("lastAction = ?");          args.push(lastAction); }
+    if (nextAction          !== undefined) { updates.push("nextAction = ?");          args.push(nextAction); }
+    if (prepNeeded          !== undefined) { updates.push("prepNeeded = ?");          args.push(prepNeeded ? 1 : 0); }
+    if (prepNotes           !== undefined) { updates.push("prepNotes = ?");           args.push(prepNotes ?? null); }
+    if (notes               !== undefined) { updates.push("notes = ?");               args.push(notes ?? null); }
+    if (jobDescriptionPath  !== undefined) { updates.push("jobDescriptionPath = ?");  args.push(jobDescriptionPath ?? null); }
+    if (jobDescription      !== undefined) { updates.push("jobDescription = ?");      args.push(jobDescription ?? null); }
     args.push(app.id as string);
     await db.execute({ sql: `UPDATE "JobApplication" SET ${updates.join(", ")} WHERE id = ?`, args });
     await regenerateTrackerMd();

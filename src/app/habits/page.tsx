@@ -33,15 +33,17 @@ interface Habit {
 }
 
 type CellStatus = "k" | "miss" | "default";
+type HeatmapCell = { status: CellStatus; date: string; dateLabel: string };
 
-function buildHeatmap(logs: HabitLog[], days = 30): CellStatus[] {
+function buildHeatmap(logs: HabitLog[], days = 30): HeatmapCell[] {
   const today = startOfDay(new Date());
   return Array.from({ length: days }, (_, i) => {
     const day    = subDays(today, days - 1 - i);
     const dayStr = format(day, "yyyy-MM-dd");
+    const dateLabel = format(day, "EEE d MMM");
     const log    = logs.find((l) => format(new Date(l.date), "yyyy-MM-dd") === dayStr);
-    if (!log)      return "default";
-    return log.kept ? "k" : "miss";
+    const status: CellStatus = !log ? "default" : log.kept ? "k" : "miss";
+    return { status, date: dayStr, dateLabel };
   });
 }
 
@@ -102,6 +104,17 @@ export default function HabitsPage() {
     load();
   };
 
+  const handleCellClick = async (habitId: string, dateStr: string, currentStatus: CellStatus) => {
+    // Cycle: default → kept, kept → missed, missed → kept
+    const newKept = currentStatus !== "k";
+    await fetch(`/api/habits/${habitId}/logs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: dateStr, kept: newKept }),
+    });
+    load();
+  };
+
   return (
     <>
       <Topbar
@@ -125,9 +138,9 @@ export default function HabitsPage() {
         }
       />
 
-      <div className="px-8 pt-7 pb-16 max-w-[1400px]">
+      <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-10 lg:pb-16 max-w-[1400px]">
         {/* Stats row */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-4 lg:mb-6">
           <StatTile label="Active"       num={habits.length} sub={<span>{habits.filter(h => h.type === "BUILD").length} BUILD · {habits.filter(h => h.type === "QUIT").length} QUIT</span>} />
           <StatTile label="Top streak"   num={topStreak}  unit="days" sub={<span>{topName}</span>} />
           <StatTile
@@ -172,7 +185,8 @@ export default function HabitsPage() {
               <PanelTitle>All habits · last 30 days</PanelTitle>
               <span className="label">today →</span>
             </PanelHead>
-            <div>
+            <div className="overflow-x-auto">
+              <div className="min-w-[540px]">
               {habitStreaks
                 .sort((a, b) => b.streak - a.streak)
                 .map((h) => (
@@ -182,7 +196,7 @@ export default function HabitsPage() {
                     style={{ gridTemplateColumns: "1fr 360px 80px" }}
                   >
                     {/* Name + tag */}
-                    <div className="min-w-0 w-[180px] shrink-0">
+                    <div className="min-w-0 w-[140px] sm:w-[180px] shrink-0">
                       <div
                         className="text-[13px] font-medium cursor-pointer"
                         onClick={() => handleCheck(h)}
@@ -197,21 +211,25 @@ export default function HabitsPage() {
                       </div>
                     </div>
 
-                    {/* Heatmap cells */}
+                    {/* Heatmap cells — click to toggle */}
                     <div
                       className="flex-1 grid gap-[2px]"
                       style={{ gridTemplateColumns: "repeat(30, 1fr)" }}
                     >
-                      {h.cells.map((status, i) => (
-                        <div
+                      {h.cells.map((cell, i) => (
+                        <button
                           key={i}
-                          className="rounded-[2px]"
+                          onClick={() => handleCellClick(h.id, cell.date, cell.status)}
+                          title={`${cell.dateLabel} — ${cell.status === "k" ? "Kept" : cell.status === "miss" ? "Missed" : "No log"} (click to toggle)`}
+                          className="rounded-[2px] cursor-pointer transition-all hover:ring-1 hover:ring-foreground/30 hover:scale-110"
                           style={{
                             height: 14,
+                            border: "none",
+                            padding: 0,
                             background:
-                              status === "k"
+                              cell.status === "k"
                                 ? "var(--primary)"
-                                : status === "miss"
+                                : cell.status === "miss"
                                 ? "oklch(0.30 0.04 25)"
                                 : "var(--muted)",
                           }}
@@ -239,6 +257,7 @@ export default function HabitsPage() {
                     </div>
                   </div>
                 ))}
+              </div>
             </div>
           </Panel>
         )}

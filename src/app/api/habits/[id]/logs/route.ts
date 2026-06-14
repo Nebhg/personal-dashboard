@@ -24,24 +24,51 @@ export async function POST(
   try {
     const body = await req.json();
     const data = habitLogSchema.parse(body);
-    const today = startOfDay(new Date());
+    // Support arbitrary date for retroactive logging, default to today
+    const targetDate = data.date
+      ? startOfDay(new Date(data.date))
+      : startOfDay(new Date());
 
     const habit = await prisma.habit.findUnique({ where: { id } });
     if (!habit) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    const log = await prisma.habitLog.upsert({
-      where: { habitId_date: { habitId: id, date: today } },
-      update: { kept: data.kept, notes: data.notes ?? null },
-      create: {
+    // Check if log already exists — if so, update (or delete if toggling off)
+    const existing = await prisma.habitLog.findUnique({
+      where: { habitId_date: { habitId: id, date: targetDate } },
+      include: { calendarEvent: true },
+    });
+
+    if (existing) {
+      // Update the existing log
+      const log = await prisma.habitLog.update({
+        where: { id: existing.id },
+        data: { kept: data.kept, notes: data.notes ?? null },
+        include: { calendarEvent: true },
+      });
+      // Update calendar event if it exists
+      if (existing.calendarEvent) {
+        await prisma.calendarEvent.update({
+          where: { id: existing.calendarEvent.id },
+          data: {
+            title: `${habit.name}: ${data.kept ? "✓ Kept" : "✗ Missed"}`,
+            color: data.kept ? AREA_COLORS.HABITS : "#ef4444",
+          },
+        });
+      }
+      return NextResponse.json(log, { status: 200 });
+    }
+
+    const log = await prisma.habitLog.create({
+      data: {
         habitId: id,
-        date: today,
+        date: targetDate,
         kept: data.kept,
         notes: data.notes ?? null,
         calendarEvent: {
           create: {
             title: `${habit.name}: ${data.kept ? "✓ Kept" : "✗ Missed"}`,
-            start: today,
-            end: today,
+            start: targetDate,
+            end: targetDate,
             allDay: true,
             area: "HABITS",
             color: data.kept ? AREA_COLORS.HABITS : "#ef4444",

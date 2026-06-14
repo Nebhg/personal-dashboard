@@ -25,6 +25,7 @@ import { Code2, Plus, Trash2, TrendingUp } from "lucide-react";
 import { Topbar, AtlasBtn } from "@/components/ui/topbar";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Panel, PanelHead, PanelTitle, PanelBody } from "@/components/ui/panel";
+import { ActivityHeatmap, HeatmapDay } from "@/components/ui/activity-heatmap";
 
 const PATTERNS = [
   "Two Pointers",
@@ -262,6 +263,23 @@ export default function LeetCodePage() {
     return d >= weekAgo;
   }).length;
 
+  // Build heatmap data
+  const heatmapData: HeatmapDay[] = [...byDate.entries()].map(([date, dayProbs]) => ({
+    date,
+    count: dayProbs.length,
+    items: dayProbs.map((p) => ({
+      label: `${p.name}${p.number ? ` #${p.number}` : ""}${p.difficulty ? ` (${p.difficulty})` : ""}`,
+    })),
+  }));
+
+  // Pattern distribution
+  const patternCounts = new Map<string, number>();
+  for (const p of problems) {
+    if (p.pattern) patternCounts.set(p.pattern, (patternCounts.get(p.pattern) ?? 0) + 1);
+  }
+  const patternsSorted = [...patternCounts.entries()].sort((a, b) => b[1] - a[1]);
+  const maxPatternCount = Math.max(1, ...patternsSorted.map(([, c]) => c));
+
   return (
     <>
       <Topbar
@@ -270,24 +288,52 @@ export default function LeetCodePage() {
         actions={<LogProblemDialog onSave={load} />}
       />
 
-      <div className="px-8 pt-7 pb-16 max-w-4xl">
-        <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-10 lg:pb-16 max-w-4xl">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-4 lg:mb-6">
           <StatTile label="Problems" num={problems.length} sub={<span>all time</span>} />
           <StatTile label="This week" num={thisWeek} sub={<span>last 7 days</span>} />
           <StatTile label="Avg confidence" num={avgConf ?? "—"} unit={avgConf ? "/10" : ""} sub={<span>self-rated</span>} />
           <StatTile label="Patterns" num={patterns.length} sub={<span>distinct covered</span>} />
         </div>
 
-        {/* Patterns covered */}
-        {patterns.length > 0 && (
-          <Panel className="mb-6">
+        {/* Activity heatmap */}
+        <Panel className="mb-4 lg:mb-6">
+          <PanelHead>
+            <PanelTitle>Activity · 13 weeks</PanelTitle>
+            <span className="label">{problems.length} problems</span>
+          </PanelHead>
+          <PanelBody>
+            <ActivityHeatmap data={heatmapData} days={91} />
+          </PanelBody>
+        </Panel>
+
+        {/* Pattern distribution */}
+        {patternsSorted.length > 0 && (
+          <Panel className="mb-4 lg:mb-6">
             <PanelHead>
-              <PanelTitle>Patterns covered</PanelTitle>
-              <span className="label">{patterns.length} total</span>
+              <PanelTitle>Pattern distribution</PanelTitle>
+              <span className="label">{patternsSorted.length} patterns</span>
             </PanelHead>
-            <PanelBody className="flex flex-wrap gap-2">
-              {patterns.map(p => (
-                <span key={p!} className="label px-2 py-1 rounded-[4px]" style={{ background: "var(--muted)", color: "var(--fg-2)" }}>{p}</span>
+            <PanelBody className="space-y-[9px]">
+              {patternsSorted.map(([pattern, count]) => (
+                <div key={pattern}>
+                  <div className="flex items-center justify-between mb-[5px]">
+                    <span className="text-[12px] text-foreground">{pattern}</span>
+                    <span className="mono text-[11px]" style={{ color: "var(--fg-3)" }}>{count}</span>
+                  </div>
+                  <div
+                    className="rounded-[2px] overflow-hidden"
+                    style={{ height: 4, background: "var(--muted)" }}
+                  >
+                    <div
+                      className="h-full rounded-[2px] transition-all"
+                      style={{
+                        width: `${(count / maxPatternCount) * 100}%`,
+                        background: "var(--primary)",
+                      }}
+                    />
+                  </div>
+                </div>
               ))}
             </PanelBody>
           </Panel>

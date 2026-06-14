@@ -27,6 +27,8 @@ export async function PATCH(
         ...(body.notes       !== undefined && { notes:       body.notes }),
         ...(body.cvPath            !== undefined && { cvPath:            body.cvPath }),
         ...(body.coverLetterPath   !== undefined && { coverLetterPath:   body.coverLetterPath }),
+        ...(body.interviewStages   !== undefined && { interviewStages:   body.interviewStages }),
+        ...(body.currentStageIdx   !== undefined && { currentStageIdx:   body.currentStageIdx }),
       },
     });
 

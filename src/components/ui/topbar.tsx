@@ -1,3 +1,6 @@
+"use client";
+
+import { Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface TopbarProps {
@@ -11,23 +14,35 @@ export function Topbar({ title, crumb, actions, className }: TopbarProps) {
   return (
     <div
       className={cn(
-        "flex items-center justify-between px-8 py-5",
-        "border-b border-border sticky top-0 z-10",
-        "bg-[color-mix(in_oklab,var(--background)_92%,transparent)] backdrop-blur-[8px]",
+        "flex items-center justify-between px-4 lg:px-8 py-1.5",
+        "border-b border-border sticky top-0 z-10 bg-background",
         className
       )}
     >
-      <div className="flex items-baseline gap-4">
-        <h1 className="text-[18px] font-semibold tracking-[-0.01em] m-0 leading-none">
-          {title}
-        </h1>
-        {crumb && (
-          <span className="mono text-[11px] text-[var(--fg-3,oklch(0.58_0.01_240))] tracking-[0.04em] uppercase">
-            {crumb}
-          </span>
-        )}
+      <div className="flex items-center gap-3 min-w-0">
+        {/* Hamburger — in normal document flow, safely below iOS gesture zones */}
+        <button
+          type="button"
+          onClick={() => document.dispatchEvent(new CustomEvent("atlas:sidebar-toggle"))}
+          className="lg:hidden flex items-center justify-center shrink-0 text-[var(--fg-2)] hover:text-foreground transition-colors"
+          style={{ width: 32, height: 32, touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
+          aria-label="Open navigation"
+        >
+          <Menu style={{ width: 18, height: 18 }} />
+        </button>
+        <div className="flex items-baseline gap-3 min-w-0">
+          <h1 className="text-[17px] lg:text-[18px] font-semibold tracking-[-0.01em] m-0 leading-none shrink-0">
+            {title}
+          </h1>
+          {crumb && (
+            <span className="mono text-[11px] text-[var(--fg-3,oklch(0.58_0.01_240))] tracking-[0.04em] uppercase hidden sm:inline truncate">
+              {crumb}
+            </span>
+          )}
+        </div>
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+
+      {actions && <div className="flex items-center gap-2 shrink-0 ml-3">{actions}</div>}
     </div>
   );
 }

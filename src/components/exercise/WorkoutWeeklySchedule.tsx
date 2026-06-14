@@ -72,6 +72,7 @@ export function WorkoutWeeklySchedule({ plans, sessions, onRefresh }: Props) {
   const [logPlan, setLogPlan] = useState<WorkoutPlan | null>(null);
   const [doneLoading, setDoneLoading] = useState<string | null>(null);
   const [undoLoading, setUndoLoading] = useState<string | null>(null);
+  const [dotLoading, setDotLoading] = useState<string | null>(null); // "planId-dateStr"
 
   const todayDow = getDay(new Date());
   const todayDisplayIdx = todayDow === 0 ? 6 : todayDow - 1;
@@ -119,6 +120,32 @@ export function WorkoutWeeklySchedule({ plans, sessions, onRefresh }: Props) {
     setUndoLoading(plan.id);
     await fetch(`/api/exercise/${session.id}`, { method: "DELETE" });
     setUndoLoading(null);
+    onRefresh();
+  }
+
+  /** Toggle attendance for a past date dot */
+  async function togglePastDay(plan: WorkoutPlan, date: Date) {
+    const key = `${plan.id}-${date.toISOString().slice(0, 10)}`;
+    setDotLoading(key);
+    const existing = sessions.find(
+      (s) => s.name === plan.name && isSameDay(startOfDay(new Date(s.date)), date)
+    );
+    if (existing) {
+      await fetch(`/api/exercise/${existing.id}`, { method: "DELETE" });
+    } else {
+      await fetch("/api/exercise", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: plan.name,
+          type: "strength",
+          durationMin: 60,
+          date: date.toISOString(),
+          exercises: [],
+        }),
+      });
+    }
+    setDotLoading(null);
     onRefresh();
   }
 
@@ -220,11 +247,16 @@ export function WorkoutWeeklySchedule({ plans, sessions, onRefresh }: Props) {
                           <div className="flex gap-0.5 flex-1">
                             {pastDots.map((date, i) => {
                               const done = hasSessionOnDate(sessions, date);
+                              const dotKey = `${plan.id}-${date.toISOString().slice(0, 10)}`;
+                              const isLoadingDot = dotLoading === dotKey;
+                              const dateLabel = date.toLocaleDateString("en-GB", { weekday: "short", month: "short", day: "numeric" });
                               return (
-                                <div
+                                <button
                                   key={i}
-                                  className={`flex-1 h-1.5 rounded-full ${done ? "bg-orange-500" : "bg-muted opacity-40"}`}
-                                  title={`${date.toLocaleDateString()}: ${done ? "Done" : "Missed"}`}
+                                  className={`flex-1 h-1.5 rounded-full transition-opacity ${done ? "bg-orange-500" : "bg-muted opacity-40"} ${isLoadingDot ? "opacity-50" : "hover:opacity-80 cursor-pointer"}`}
+                                  title={`${dateLabel}: ${done ? "Done — click to undo" : "Missed — click to log"}`}
+                                  disabled={isLoadingDot}
+                                  onClick={() => togglePastDay(plan, date)}
                                 />
                               );
                             })}

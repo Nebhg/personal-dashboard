@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Sparkline } from "./sparkline";
+import { LineChart, type LinePoint } from "./line-chart";
 
 interface StatTileProps {
   label: string;
@@ -9,6 +10,11 @@ interface StatTileProps {
   delta?: string;
   deltaDir?: "up" | "down" | "flat";
   spark?: number[];
+  /** Interactive day-by-day series (renders LineChart instead of Sparkline) */
+  series?: LinePoint[];
+  /** Serializable tooltip value affixes for the interactive series */
+  valuePrefix?: string;
+  valueSuffix?: string;
   sparkColor?: string;
   onClick?: () => void;
   className?: string;
@@ -22,6 +28,9 @@ export function StatTile({
   delta,
   deltaDir = "flat",
   spark,
+  series,
+  valuePrefix,
+  valueSuffix,
   sparkColor,
   onClick,
   className,
@@ -30,7 +39,7 @@ export function StatTile({
     <div
       className={cn(
         "bg-card border border-border rounded-[6px] overflow-hidden",
-        "flex flex-col gap-1.5 p-[18px] pb-4 cursor-pointer transition-colors",
+        "flex flex-col gap-1 p-2 sm:p-[9px] cursor-pointer transition-colors",
         "hover:border-[oklch(1_0_0/0.12)]",
         className
       )}
@@ -52,7 +61,7 @@ export function StatTile({
         )}
       </div>
       <div className="leading-none">
-        <span className="mono text-[32px] font-[500] tracking-[-0.02em] text-foreground tabular-nums">
+        <span className="mono text-[24px] sm:text-[28px] font-[500] tracking-[-0.02em] text-foreground tabular-nums">
           {num}
         </span>
         {unit && (
@@ -66,7 +75,13 @@ export function StatTile({
           {sub}
         </div>
       )}
-      {spark && <Sparkline data={spark} color={sparkColor} />}
+      {series && series.length >= 2 ? (
+        <div className="mt-auto pt-1">
+          <LineChart data={series} color={sparkColor} valuePrefix={valuePrefix} valueSuffix={valueSuffix} height={36} />
+        </div>
+      ) : (
+        spark && <Sparkline data={spark} color={sparkColor} />
+      )}
     </div>
   );
 }

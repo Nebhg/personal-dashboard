@@ -60,7 +60,7 @@ export default async function CalendarPage() {
         title="Calendar"
         crumb={`MONTH VIEW · ${viewLabel}`}
       />
-      <div className="px-8 pt-7 pb-16">
+      <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-10 lg:pb-16">
         <div
           className="rounded-[6px] overflow-hidden"
           style={{ background: "var(--card)", border: "1px solid var(--border)" }}

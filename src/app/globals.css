@@ -175,6 +175,8 @@
     -webkit-font-smoothing: antialiased;
     font-size: 14px;
     line-height: 1.45;
+    /* Eliminate 300ms tap delay on iOS without disabling pinch-zoom */
+    touch-action: manipulation;
   }
 }
 

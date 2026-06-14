@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, createFreshPrismaClient } from "@/lib/prisma";
 import { regenerateTrackerMd } from "@/lib/career-sync";
 
 export async function GET() {
-  const applications = await prisma.jobApplication.findMany({
-    orderBy: { updatedAt: "desc" },
-  });
-  return NextResponse.json(applications);
+  // Use a fresh client so MCP writes are visible without restarting the container
+  const client = createFreshPrismaClient();
+  try {
+    const applications = await client.jobApplication.findMany({
+      orderBy: { updatedAt: "desc" },
+    });
+    return NextResponse.json(applications);
+  } finally {
+    await client.$disconnect();
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -20,15 +26,17 @@ export async function POST(req: NextRequest) {
 
     const application = await prisma.jobApplication.create({
       data: {
-        firm:        body.firm,
-        role:        body.role        ?? null,
-        stage:       body.stage       ?? "APPLIED",
-        appliedDate: body.appliedDate ?? null,
-        lastAction:  body.lastAction  ?? null,
-        nextAction:  body.nextAction  ?? null,
-        prepNeeded:  body.prepNeeded  ?? false,
-        prepNotes:   body.prepNotes   ?? null,
-        notes:       body.notes       ?? null,
+        firm:            body.firm,
+        role:            body.role            ?? null,
+        stage:           body.stage           ?? "APPLIED",
+        appliedDate:     body.appliedDate     ?? null,
+        lastAction:      body.lastAction      ?? null,
+        nextAction:      body.nextAction      ?? null,
+        prepNeeded:      body.prepNeeded      ?? false,
+        prepNotes:       body.prepNotes       ?? null,
+        notes:           body.notes           ?? null,
+        interviewStages: body.interviewStages ?? null,
+        currentStageIdx: body.currentStageIdx ?? 0,
       },
     });
 

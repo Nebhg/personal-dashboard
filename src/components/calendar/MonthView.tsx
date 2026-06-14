@@ -74,7 +74,7 @@ export function MonthView({
   return (
     <div
       className="grid"
-      style={{ gridTemplateColumns: "repeat(7, 1fr)" }}
+      style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}
     >
       {/* Day-of-week headers */}
       {DOW.map((d) => (
@@ -112,7 +112,7 @@ export function MonthView({
           <div
             key={i}
             onClick={() => !c.out && onSelectDay(new Date(year, month, c.d))}
-            className="group relative flex flex-col gap-1 transition-colors cursor-pointer"
+            className="group relative flex flex-col gap-1 transition-colors cursor-pointer min-w-0 overflow-hidden"
             style={{
               padding: "8px 10px 10px",
               minHeight: 110,
@@ -221,6 +221,7 @@ export function MonthView({
                 />
                 {!e.allDay && (
                   <span
+                    suppressHydrationWarning
                     className="shrink-0"
                     style={{
                       fontFamily: "var(--font-jetbrains-mono, monospace)",

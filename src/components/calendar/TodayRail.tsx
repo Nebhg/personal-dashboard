@@ -106,6 +106,7 @@ export function TodayRail({ today, events, wfhDates }: Props) {
                 }}
               >
                 <div
+                  suppressHydrationWarning
                   style={{
                     fontFamily: "var(--font-jetbrains-mono, monospace)",
                     fontSize: 10,

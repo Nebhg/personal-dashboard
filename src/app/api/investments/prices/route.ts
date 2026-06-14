@@ -40,7 +40,10 @@ export async function GET() {
       })
     );
 
-    const priceMap: Record<string, { price: number; changePercent: number | null }> = {};
+    const priceMap: Record<
+      string,
+      { price: number; changePercent: number | null; change: number | null }
+    > = {};
     const errors: string[] = [];
 
     for (const result of settled) {
@@ -50,6 +53,7 @@ export async function GET() {
           priceMap[sym] = {
             price: quote.regularMarketPrice as number,
             changePercent: (quote.regularMarketChangePercent as number | undefined) ?? null,
+            change: (quote.regularMarketChange as number | undefined) ?? null,
           };
         }
       } else {
@@ -76,6 +80,7 @@ export async function GET() {
         priceCurrency: string;
         valueGbp: number;
         changePercent: number | null;
+        dayChangeGbp: number | null;
         quantity: number;
         costGbp: number;
       }
@@ -87,12 +92,16 @@ export async function GET() {
 
       for (const h of holdingList) {
         let valueGbp: number;
+        let dayChangeGbp: number | null = null;
         if (h.priceCurrency === "GBP") {
           valueGbp = q.price * h.quantity;
+          dayChangeGbp = q.change != null ? q.change * h.quantity : null;
         } else if (gbpUsd) {
           valueGbp = (q.price / gbpUsd) * h.quantity;
+          dayChangeGbp = q.change != null ? (q.change / gbpUsd) * h.quantity : null;
         } else {
           valueGbp = q.price * h.quantity;
+          dayChangeGbp = q.change != null ? q.change * h.quantity : null;
         }
 
         prices[h.id] = {
@@ -103,6 +112,7 @@ export async function GET() {
           priceCurrency: h.priceCurrency,
           valueGbp,
           changePercent: q.changePercent,
+          dayChangeGbp,
           quantity: h.quantity,
           costGbp: h.costGbp,
         };
