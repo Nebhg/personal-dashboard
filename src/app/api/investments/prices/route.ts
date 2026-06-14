@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { regeneratePortfolioMd } from "@/lib/investments-sync";
 import YahooFinance from "yahoo-finance2";
 // Instantiate once — v3 uses class-based API
-const yahooFinance = new YahooFinance();
+const yahooFinance = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 
 // LSE-listed securities need a .L suffix in Yahoo Finance
 function toYfTicker(ticker: string, priceCurrency: string): string {

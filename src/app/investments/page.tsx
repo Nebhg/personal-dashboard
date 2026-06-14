@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { RefreshCw, Save, Plus, Pencil, Trash2, ChevronDown, ChevronRight, Wallet, Wifi, WifiOff } from "lucide-react";
+import { RefreshCw, Plus, Pencil, Trash2, ChevronDown, ChevronRight, Wallet, Wifi, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Topbar, AtlasBtn } from "@/components/ui/topbar";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -587,8 +587,6 @@ export default function InvestmentsPage() {
   const [live, setLive] = useState<LivePriceState | null>(null);
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
   useEffect(() => {
     fetch("/api/investments")
       .then((r) => r.json())
@@ -608,29 +606,20 @@ export default function InvestmentsPage() {
       const data = await r.json();
       if (data.error) { setLiveError(data.error); return; }
       setLive(data);
-    } catch (e) {
-      setLiveError(String(e));
-    } finally {
-      setLiveLoading(false);
-    }
-  }
-
-  async function saveLivePrices() {
-    if (!live) return;
-    setSaving(true);
-    try {
+      // Auto-save to DB so MCP and dispatcher always see fresh prices
       await fetch("/api/investments/prices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prices: Object.fromEntries(
-          Object.entries(live.prices).map(([id, p]) => [id, { price: p.price, valueGbp: p.valueGbp }])
+          Object.entries(data.prices as Record<string, LivePrice>).map(([id, p]) => [id, { price: p.price, valueGbp: p.valueGbp }])
         )}),
       });
-      // Refresh accounts from DB to reflect saved prices
-      const data = await fetch("/api/investments").then(r => r.json());
-      setAccounts(data);
+      const accountData = await fetch("/api/investments").then((res) => res.json());
+      setAccounts(accountData);
+    } catch (e) {
+      setLiveError(String(e));
     } finally {
-      setSaving(false);
+      setLiveLoading(false);
     }
   }
 
@@ -700,12 +689,6 @@ export default function InvestmentsPage() {
         crumb={liveStatusCrumb}
         actions={
           <div className="flex items-center gap-2">
-            {live && (
-              <AtlasBtn variant="default" onClick={saveLivePrices} disabled={saving}>
-                <Save className="h-[13px] w-[13px]" />
-                {saving ? "Saving…" : "Save prices"}
-              </AtlasBtn>
-            )}
             <AtlasBtn variant="default" onClick={fetchLivePrices} disabled={liveLoading}>
               <RefreshCw className={cn("h-[13px] w-[13px]", liveLoading && "animate-spin")} />
               {liveLoading ? "Fetching…" : "Refresh"}

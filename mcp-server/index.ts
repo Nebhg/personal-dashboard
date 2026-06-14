@@ -1509,6 +1509,205 @@ server.tool(
   }
 );
 
+// ─── INVESTMENTS ──────────────────────────────────────────────────────────────
+
+server.tool(
+  "get_investments",
+  "Get all investment accounts and their holdings with current values and P&L. Automatically refreshes prices from Yahoo Finance before reading.",
+  {},
+  async () => {
+    try {
+      // Refresh live prices via the dashboard API and write back to DB
+      try {
+        const priceResp = await fetch("http://localhost:3000/api/investments/prices");
+        const priceData = await priceResp.json() as { prices?: Record<string, { price: number; valueGbp: number }>; error?: string };
+        if (priceData.prices && !priceData.error) {
+          await fetch("http://localhost:3000/api/investments/prices", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prices: Object.fromEntries(
+              Object.entries(priceData.prices).map(([id, p]) => [id, { price: p.price, valueGbp: p.valueGbp }])
+            )}),
+          });
+        }
+      } catch {
+        // Dashboard API unreachable — continue with last saved prices
+      }
+
+      const accounts = await db.execute(`SELECT * FROM "InvestmentAccount" ORDER BY name`);
+      const holdings = await db.execute(`SELECT * FROM "InvestmentHolding" ORDER BY accountId, name`);
+
+      const lines: string[] = [];
+      for (const acc of accounts.rows) {
+        const accHoldings = holdings.rows.filter((h) => h.accountId === acc.id);
+        const totalValueGbp = accHoldings.reduce((s, h) => s + ((h.valueGbp as number) ?? 0), 0);
+        const totalCostGbp = accHoldings.reduce((s, h) => s + ((h.costGbp as number) ?? 0), 0);
+        const totalReturnPct = totalCostGbp > 0 ? ((totalValueGbp - totalCostGbp) / totalCostGbp) * 100 : 0;
+
+        lines.push(`## ${acc.name} (${acc.accountType})`);
+        if (acc.cashBalanceGbp) lines.push(`  Cash: £${(acc.cashBalanceGbp as number).toFixed(2)}${acc.interestRate ? ` @ ${acc.interestRate}% p.a.` : ""}`);
+        if (acc.isaAllowanceUsed) lines.push(`  ISA allowance used: £${(acc.isaAllowanceUsed as number).toFixed(2)}`);
+
+        if (accHoldings.length > 0) {
+          lines.push(`  Holdings (${accHoldings.length}): total value £${totalValueGbp.toFixed(2)}, cost £${totalCostGbp.toFixed(2)}, return ${totalReturnPct >= 0 ? "+" : ""}${totalReturnPct.toFixed(1)}%`);
+          for (const h of accHoldings) {
+            const retGbp = ((h.valueGbp as number) ?? 0) - (h.costGbp as number);
+            const retPct = (h.costGbp as number) > 0 ? (retGbp / (h.costGbp as number)) * 100 : 0;
+            lines.push(`  - ${h.name}${h.ticker ? ` (${h.ticker})` : ""}: qty ${h.quantity}, last £${h.lastPrice ?? "?"} ${h.priceCurrency}, value £${(h.valueGbp as number)?.toFixed(2) ?? "?"}, cost £${(h.costGbp as number).toFixed(2)}, return ${retPct >= 0 ? "+" : ""}${retPct.toFixed(1)}%`);
+          }
+        } else {
+          lines.push(`  No holdings`);
+        }
+        lines.push("");
+      }
+      return { content: [{ type: "text" as const, text: lines.join("\n") || "No accounts found." }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Error: ${String(err)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "add_holding",
+  "Add a new holding to an investment account. Creates the account if it doesn't exist yet.",
+  {
+    accountName: z.string().describe("Account name, e.g. 'Trading 212 Stocks ISA' or 'Trading 212 Invest'"),
+    accountType: z.string().optional().describe("ISA_STOCKS | INVEST | SIPP | OTHER — only needed if creating account"),
+    broker: z.string().optional().describe("Broker name, e.g. 'Trading 212' — only needed if creating account"),
+    name: z.string().describe("Full holding name, e.g. 'Advanced Micro Devices Inc'"),
+    ticker: z.string().optional().describe("Ticker symbol, e.g. 'AMD'"),
+    quantity: z.number().describe("Number of shares/units held"),
+    costGbp: z.number().describe("Total cost basis in GBP"),
+    lastPrice: z.number().optional().describe("Last known price in the stock's trading currency"),
+    priceCurrency: z.string().optional().describe("Currency the stock trades in, e.g. 'USD' (default: USD)"),
+    valueGbp: z.number().optional().describe("Current total value in GBP"),
+    notes: z.string().optional(),
+  },
+  async ({ accountName, accountType, broker, name, ticker, quantity, costGbp, lastPrice, priceCurrency, valueGbp, notes }) => {
+    try {
+      // Find or create account
+      let acc = (await db.execute({ sql: `SELECT * FROM "InvestmentAccount" WHERE name = ? LIMIT 1`, args: [accountName] })).rows[0];
+      if (!acc) {
+        const accId = uid();
+        await db.execute({
+          sql: `INSERT INTO "InvestmentAccount" (id, name, broker, accountType, cashBalanceGbp, createdAt, updatedAt) VALUES (?, ?, ?, ?, 0, datetime('now'), datetime('now'))`,
+          args: [accId, accountName, broker ?? "Unknown", accountType ?? "OTHER"],
+        });
+        acc = (await db.execute({ sql: `SELECT * FROM "InvestmentAccount" WHERE id = ? LIMIT 1`, args: [accId] })).rows[0];
+      }
+
+      const holdingId = uid();
+      await db.execute({
+        sql: `INSERT INTO "InvestmentHolding" (id, accountId, name, ticker, quantity, costGbp, lastPrice, priceCurrency, valueGbp, notes, createdAt, updatedAt)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+        args: [holdingId, acc.id, name, ticker ?? null, quantity, costGbp, lastPrice ?? null, priceCurrency ?? "USD", valueGbp ?? null, notes ?? null],
+      });
+      return { content: [{ type: "text" as const, text: `Added ${name}${ticker ? ` (${ticker})` : ""} to ${accountName}: qty ${quantity}, cost £${costGbp}${valueGbp ? `, current value £${valueGbp}` : ""}` }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Error: ${String(err)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "update_holding",
+  "Update an existing holding — price, value, quantity, or cost basis. Use get_investments to find holding names.",
+  {
+    accountName: z.string().describe("Account the holding belongs to"),
+    name: z.string().describe("Holding name as stored (partial match OK)"),
+    quantity: z.number().optional(),
+    costGbp: z.number().optional().describe("Updated cost basis in GBP"),
+    lastPrice: z.number().optional().describe("Updated last price in trading currency"),
+    priceCurrency: z.string().optional(),
+    valueGbp: z.number().optional().describe("Updated total value in GBP"),
+    notes: z.string().optional(),
+  },
+  async ({ accountName, name, quantity, costGbp, lastPrice, priceCurrency, valueGbp, notes }) => {
+    try {
+      const acc = (await db.execute({ sql: `SELECT * FROM "InvestmentAccount" WHERE name = ? LIMIT 1`, args: [accountName] })).rows[0];
+      if (!acc) return { content: [{ type: "text" as const, text: `Account "${accountName}" not found` }] };
+
+      const holding = (await db.execute({ sql: `SELECT * FROM "InvestmentHolding" WHERE accountId = ? AND name LIKE ? LIMIT 1`, args: [acc.id, `%${name}%`] })).rows[0];
+      if (!holding) return { content: [{ type: "text" as const, text: `Holding matching "${name}" not found in ${accountName}` }] };
+
+      const updates: string[] = [];
+      const args: InValue[] = [];
+      if (quantity !== undefined) { updates.push(`quantity = ?`); args.push(quantity); }
+      if (costGbp !== undefined) { updates.push(`costGbp = ?`); args.push(costGbp); }
+      if (lastPrice !== undefined) { updates.push(`lastPrice = ?`); args.push(lastPrice); }
+      if (priceCurrency !== undefined) { updates.push(`priceCurrency = ?`); args.push(priceCurrency); }
+      if (valueGbp !== undefined) { updates.push(`valueGbp = ?`); args.push(valueGbp); }
+      if (notes !== undefined) { updates.push(`notes = ?`); args.push(notes); }
+      if (updates.length === 0) return { content: [{ type: "text" as const, text: "Nothing to update" }] };
+
+      updates.push(`updatedAt = datetime('now')`);
+      args.push(holding.id as InValue);
+      await db.execute({ sql: `UPDATE "InvestmentHolding" SET ${updates.join(", ")} WHERE id = ?`, args });
+
+      return { content: [{ type: "text" as const, text: `Updated ${holding.name}${valueGbp !== undefined ? ` — value now £${valueGbp}` : ""}${lastPrice !== undefined ? `, last price ${lastPrice}` : ""}` }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Error: ${String(err)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "delete_holding",
+  "Remove a holding from an investment account.",
+  {
+    accountName: z.string().describe("Account the holding belongs to"),
+    name: z.string().describe("Holding name (partial match OK)"),
+  },
+  async ({ accountName, name }) => {
+    try {
+      const acc = (await db.execute({ sql: `SELECT * FROM "InvestmentAccount" WHERE name = ? LIMIT 1`, args: [accountName] })).rows[0];
+      if (!acc) return { content: [{ type: "text" as const, text: `Account "${accountName}" not found` }] };
+
+      const holding = (await db.execute({ sql: `SELECT * FROM "InvestmentHolding" WHERE accountId = ? AND name LIKE ? LIMIT 1`, args: [acc.id, `%${name}%`] })).rows[0];
+      if (!holding) return { content: [{ type: "text" as const, text: `Holding matching "${name}" not found in ${accountName}` }] };
+
+      await db.execute({ sql: `DELETE FROM "InvestmentHolding" WHERE id = ?`, args: [holding.id as InValue] });
+      return { content: [{ type: "text" as const, text: `Deleted ${holding.name} from ${accountName}` }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Error: ${String(err)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "update_account",
+  "Update account-level data: cash balance, ISA allowance used, interest rate.",
+  {
+    accountName: z.string().describe("Account name, e.g. 'Trading 212 Stocks ISA'"),
+    cashBalanceGbp: z.number().optional(),
+    interestRate: z.number().optional().describe("Annual interest rate on uninvested cash, e.g. 3.5"),
+    isaAllowanceUsed: z.number().optional().describe("GBP used of annual ISA allowance"),
+    notes: z.string().optional(),
+  },
+  async ({ accountName, cashBalanceGbp, interestRate, isaAllowanceUsed, notes }) => {
+    try {
+      const acc = (await db.execute({ sql: `SELECT * FROM "InvestmentAccount" WHERE name = ? LIMIT 1`, args: [accountName] })).rows[0];
+      if (!acc) return { content: [{ type: "text" as const, text: `Account "${accountName}" not found` }] };
+
+      const updates: string[] = [];
+      const args: InValue[] = [];
+      if (cashBalanceGbp !== undefined) { updates.push(`cashBalanceGbp = ?`); args.push(cashBalanceGbp); }
+      if (interestRate !== undefined) { updates.push(`interestRate = ?`); args.push(interestRate); }
+      if (isaAllowanceUsed !== undefined) { updates.push(`isaAllowanceUsed = ?`); args.push(isaAllowanceUsed); }
+      if (notes !== undefined) { updates.push(`notes = ?`); args.push(notes); }
+      if (updates.length === 0) return { content: [{ type: "text" as const, text: "Nothing to update" }] };
+
+      updates.push(`updatedAt = datetime('now')`);
+      args.push(acc.id as InValue);
+      await db.execute({ sql: `UPDATE "InvestmentAccount" SET ${updates.join(", ")} WHERE id = ?`, args });
+
+      return { content: [{ type: "text" as const, text: `Updated ${accountName}` }] };
+    } catch (err) {
+      return { content: [{ type: "text" as const, text: `Error: ${String(err)}` }] };
+    }
+  }
+);
+
 // ─── START SERVER ─────────────────────────────────────────────────────────────
 
 async function main() {
