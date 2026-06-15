@@ -1,22 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, createFreshPrismaClient } from "@/lib/prisma";
 import { habitSchema } from "@/lib/validations/habits";
 import { startOfDay, subDays } from "date-fns";
 
 export async function GET() {
   const since = subDays(startOfDay(new Date()), 90);
 
-  const habits = await prisma.habit.findMany({
-    orderBy: { createdAt: "asc" },
-    include: {
-      logs: {
-        where: { date: { gte: since } },
-        orderBy: { date: "desc" },
+  const client = createFreshPrismaClient();
+  try {
+    const habits = await client.habit.findMany({
+      orderBy: { createdAt: "asc" },
+      include: {
+        logs: {
+          where: { date: { gte: since } },
+          orderBy: { date: "desc" },
+        },
       },
-    },
-  });
-
-  return NextResponse.json(habits);
+    });
+    return NextResponse.json(habits);
+  } finally {
+    await client.$disconnect();
+  }
 }
 
 export async function POST(req: NextRequest) {

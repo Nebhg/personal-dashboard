@@ -36,6 +36,9 @@ model CalendarEvent {
   scheduleBlockId   String?          @unique
   scheduleBlock     ScheduleBlock?   @relation(fields: [scheduleBlockId], references: [id], onDelete: Cascade)
 
+  sleepLogId        String?          @unique
+  sleepLog          SleepLog?        @relation(fields: [sleepLogId], references: [id], onDelete: Cascade)
+
   gcalEventId String?  // Google Calendar event ID (set after async push)
 
   createdAt DateTime @default(now())
@@ -126,6 +129,41 @@ model DietGoal {
   targetFat      Int?
   activeFrom     DateTime @default(now())
   createdAt      DateTime @default(now())
+}
+
+// ─────────────────────────────────────────
+// HYDRATION (water intake)
+// ─────────────────────────────────────────
+
+model HydrationLog {
+  id        String   @id @default(cuid())
+  date      DateTime // timestamp of the entry
+  amountMl  Int      // always stored in mL (glasses * 250 on input)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+}
+
+// ─────────────────────────────────────────
+// REST / SLEEP
+// ─────────────────────────────────────────
+
+model SleepLog {
+  id          String   @id @default(cuid())
+  date        DateTime // the night's date (date you woke up)
+  bedTime     DateTime
+  wakeTime    DateTime
+  durationMin Int      // computed = wakeTime - bedTime
+  quality     Int?     // 1–10
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  calendarEvent CalendarEvent?
+
+  @@index([date])
 }
 
 // ─────────────────────────────────────────

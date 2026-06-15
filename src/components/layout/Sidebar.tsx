@@ -8,6 +8,7 @@ import {
   Calendar,
   Utensils,
   Dumbbell,
+  Moon,
   Target,
   Briefcase,
   Code2,
@@ -26,6 +27,7 @@ const WELLBEING = [
   { href: "/habits",      label: "Habits",    icon: Target },
   { href: "/diet",        label: "Diet",      icon: Utensils },
   { href: "/exercise",    label: "Exercise",  icon: Dumbbell },
+  { href: "/rest",        label: "Rest",      icon: Moon },
 ];
 
 const TRACKING = [

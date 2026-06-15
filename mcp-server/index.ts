@@ -89,6 +89,32 @@ async function runStartupMigrations(): Promise<void> {
   };
   await alterIfMissing("JobApplication", "jobDescriptionPath", "TEXT");
   await alterIfMissing("JobApplication", "jobDescription", "TEXT");
+
+  // Hydration + sleep tracking (safety net if the Prisma migration hasn't run).
+  try {
+    await db.execute(`CREATE TABLE IF NOT EXISTS "HydrationLog" (
+      "id" TEXT PRIMARY KEY NOT NULL,
+      "date" DATETIME NOT NULL,
+      "amountMl" INTEGER NOT NULL,
+      "notes" TEXT,
+      "createdAt" DATETIME NOT NULL,
+      "updatedAt" DATETIME NOT NULL
+    )`);
+    await db.execute(`CREATE TABLE IF NOT EXISTS "SleepLog" (
+      "id" TEXT PRIMARY KEY NOT NULL,
+      "date" DATETIME NOT NULL,
+      "bedTime" DATETIME NOT NULL,
+      "wakeTime" DATETIME NOT NULL,
+      "durationMin" INTEGER NOT NULL,
+      "quality" INTEGER,
+      "notes" TEXT,
+      "createdAt" DATETIME NOT NULL,
+      "updatedAt" DATETIME NOT NULL
+    )`);
+  } catch (e) {
+    console.error("[migration] hydration/sleep table create error:", e);
+  }
+  await alterIfMissing("CalendarEvent", "sleepLogId", "TEXT");
 }
 runStartupMigrations().catch((e) => console.error("[migration] startup error:", e));
 
@@ -148,12 +174,14 @@ server.tool(
     const todayStart = startOfDay(now);
     const weekStart = subDays(todayStart, 7);
 
-    const [mealsRes, workoutsRes, sessionsRes, habitsRes, habitLogsRes] = await Promise.all([
+    const [mealsRes, workoutsRes, sessionsRes, habitsRes, habitLogsRes, hydrationRes, sleepRes] = await Promise.all([
       db.execute({ sql: `SELECT * FROM "MealLog" WHERE date >= ?`, args: [todayStart.toISOString()] }),
       db.execute({ sql: `SELECT * FROM "WorkoutSession" WHERE date >= ?`, args: [weekStart.toISOString()] }),
       db.execute({ sql: `SELECT * FROM "LearningSession" WHERE date >= ?`, args: [weekStart.toISOString()] }),
       db.execute({ sql: `SELECT * FROM "Habit"`, args: [] }),
       db.execute({ sql: `SELECT * FROM "HabitLog" WHERE date >= ?`, args: [weekStart.toISOString()] }),
+      db.execute({ sql: `SELECT * FROM "HydrationLog" WHERE date >= ?`, args: [todayStart.toISOString()] }),
+      db.execute({ sql: `SELECT * FROM "SleepLog" WHERE date >= ? ORDER BY date DESC`, args: [weekStart.toISOString()] }),
     ]);
 
     const meals = mealsRes.rows;
@@ -161,8 +189,15 @@ server.tool(
     const sessions = sessionsRes.rows;
     const habits = habitsRes.rows;
     const habitLogs = habitLogsRes.rows;
+    const hydrationLogs = hydrationRes.rows;
+    const sleepLogs = sleepRes.rows;
 
     const todayCalories = meals.reduce((s, m) => s + ((m.calories as number) ?? 0), 0);
+    const todayMl = hydrationLogs.reduce((s, h) => s + ((h.amountMl as number) ?? 0), 0);
+    const lastNight = sleepLogs[0];
+    const sleepAvgMin = sleepLogs.length > 0
+      ? Math.round(sleepLogs.reduce((s, l) => s + ((l.durationMin as number) ?? 0), 0) / sleepLogs.length)
+      : 0;
 
     const habitData = habits.map((h) => {
       const logs = habitLogs
@@ -182,6 +217,16 @@ server.tool(
         text: JSON.stringify({
           date: format(now, "yyyy-MM-dd"),
           diet: { todayMeals: meals.length, todayCalories },
+          hydration: {
+            todayMl,
+            goalMl: 2000,
+            glasses: Math.round((todayMl / 250) * 10) / 10,
+          },
+          sleep: {
+            lastNightMin: lastNight ? (lastNight.durationMin as number) : null,
+            quality: lastNight ? ((lastNight.quality as number) ?? null) : null,
+            avgMinThisWeek: sleepAvgMin,
+          },
           exercise: {
             sessionsThisWeek: workouts.length,
             totalMinutesThisWeek: workouts.reduce((s, w) => s + (w.durationMin as number), 0),
@@ -227,6 +272,72 @@ server.tool(
     ]);
 
     return { content: [{ type: "text" as const, text: `Logged meal: ${mealId}` }] };
+  }
+);
+
+server.tool(
+  "log_hydration",
+  "Log water / fluid intake. Provide either amountMl or glasses (1 glass = 250ml). Daily goal is 2000ml (8 glasses).",
+  {
+    amountMl: z.number().optional().describe("Amount in millilitres"),
+    glasses: z.number().optional().describe("Number of 250ml glasses (converted to ml)"),
+    notes: z.string().optional(),
+  },
+  async ({ amountMl, glasses, notes }) => {
+    const ml = amountMl ?? (glasses != null ? Math.round(glasses * 250) : null);
+    if (ml == null || ml <= 0) {
+      return { content: [{ type: "text" as const, text: "Provide amountMl or glasses (a positive amount)." }] };
+    }
+    const now = new Date();
+    const logId = uid();
+    const isoNow = now.toISOString();
+
+    await db.execute({
+      sql: `INSERT INTO "HydrationLog" (id, date, amountMl, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [logId, isoNow, ml, notes ?? null, isoNow, isoNow],
+    });
+
+    return { content: [{ type: "text" as const, text: `Logged ${ml}ml water (${(ml / 250).toFixed(1)} glasses): ${logId}` }] };
+  }
+);
+
+server.tool(
+  "log_sleep",
+  "Log a night's sleep. Provide bedTime and wakeTime as ISO timestamps (duration is computed), plus optional quality 1-10. Daily goal is 8 hours.",
+  {
+    bedTime: z.string().describe("Bed time as ISO timestamp, e.g. 2026-06-14T23:00:00"),
+    wakeTime: z.string().describe("Wake time as ISO timestamp, e.g. 2026-06-15T07:00:00"),
+    quality: z.number().int().min(1).max(10).optional().describe("Sleep quality 1-10"),
+    notes: z.string().optional(),
+  },
+  async ({ bedTime, wakeTime, quality, notes }) => {
+    const bed = new Date(bedTime);
+    const wake = new Date(wakeTime);
+    const durationMin = Math.round((wake.getTime() - bed.getTime()) / 60000);
+    if (isNaN(durationMin) || durationMin <= 0) {
+      return { content: [{ type: "text" as const, text: "Invalid times: wakeTime must be after bedTime." }] };
+    }
+    const logId = uid();
+    const eventId = uid();
+    const isoNow = new Date().toISOString();
+    // The night belongs to the day you woke up.
+    const dateIso = startOfDay(wake).toISOString();
+    const hours = Math.floor(durationMin / 60);
+    const mins = durationMin % 60;
+    const qualityStr = quality ? ` · quality ${quality}/10` : "";
+
+    await db.batch([
+      {
+        sql: `INSERT INTO "SleepLog" (id, date, bedTime, wakeTime, durationMin, quality, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [logId, dateIso, bed.toISOString(), wake.toISOString(), durationMin, quality ?? null, notes ?? null, isoNow, isoNow],
+      },
+      {
+        sql: `INSERT INTO "CalendarEvent" (id, title, start, end, allDay, area, color, description, mealLogId, workoutSessionId, learningSessionId, habitLogId, scheduleBlockId, sleepLogId, createdAt, updatedAt) VALUES (?, ?, ?, ?, 0, 'SLEEP', '#64748b', NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`,
+        args: [eventId, `Sleep: ${hours}h ${mins}m${qualityStr}`, bed.toISOString(), wake.toISOString(), logId, isoNow, isoNow],
+      },
+    ]);
+
+    return { content: [{ type: "text" as const, text: `Logged sleep ${hours}h ${mins}m${qualityStr}: ${logId}` }] };
   }
 );
 
@@ -622,17 +733,39 @@ server.tool(
       z.array(z.number().int().min(0).max(6)),
       z.string().transform((s) => JSON.parse(s) as number[]),
     ]).describe("Days of week as array (0=Sun … 6=Sat), e.g. [1,3,6] for Mon/Wed/Sat"),
-    exercises: z.union([
-      z.array(z.object({
-        name: z.string(),
-        sets: z.coerce.number().int().optional(),
-        reps: z.coerce.number().int().optional(),
-        weightKg: z.coerce.number().optional(),
-        restSec: z.coerce.number().int().optional(),
-        notes: z.string().optional(),
-      })),
-      z.string().transform((s) => JSON.parse(s) as object[]),
-    ]),
+    // Accept either a real array or a JSON string, then validate every
+    // exercise the same way. Numeric columns (sets/reps/restSec/weightKg)
+    // can't hold text like "max reps" or "30 sec" — SQLite stores it but
+    // Prisma refuses to read it back (P2023). Any non-numeric value is moved
+    // into notes and the numeric field is nulled so the row stays readable.
+    exercises: z.preprocess(
+      (v) => (typeof v === "string" ? JSON.parse(v) : v),
+      z.array(
+        z.preprocess((raw) => {
+          if (typeof raw !== "object" || raw === null) return raw;
+          const ex = { ...(raw as Record<string, unknown>) };
+          for (const field of ["sets", "reps", "restSec", "weightKg"] as const) {
+            const val = ex[field];
+            if (val === null || val === undefined || val === "") continue;
+            const n = Number(val);
+            const ok = field === "weightKg" ? Number.isFinite(n) : Number.isInteger(n);
+            if (!ok) {
+              const tag = `${field}: ${val}`;
+              ex.notes = ex.notes ? `${ex.notes} | ${tag}` : tag;
+              ex[field] = null;
+            }
+          }
+          return ex;
+        }, z.object({
+          name: z.string(),
+          sets: z.coerce.number().int().nullable().optional(),
+          reps: z.coerce.number().int().nullable().optional(),
+          weightKg: z.coerce.number().nullable().optional(),
+          restSec: z.coerce.number().int().nullable().optional(),
+          notes: z.string().optional(),
+        }))
+      )
+    ),
   },
   async ({ name, description, scheduledDays, exercises }) => {
     const isoNow = new Date().toISOString();

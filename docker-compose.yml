@@ -21,6 +21,10 @@ services:
     environment:
       - DATABASE_URL=file:///data/dev.db
       - NODE_ENV=development
+      # Silence only the benign zlib.bytesRead deprecation warning (DEP0108)
+      # emitted by an upstream dep during gzip handling. Persists across
+      # rebuilds — unlike chasing dependency versions, which only masks it.
+      - NODE_OPTIONS=--disable-warning=DEP0108
       - WATCHPACK_POLLING=true
       - CHOKIDAR_USEPOLLING=true
       # Dispatcher is a sibling service — use Docker's internal DNS name

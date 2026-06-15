@@ -41,6 +41,8 @@ export default async function DashboardPage() {
     recentWorkouts,
     recentLeetcode,
     recentMacro,
+    todayHydration,
+    weekSleep,
     portfolioHistory,
   ] = await Promise.all([
     prisma.mealLog.findMany({ where: { date: { gte: todayStart, lte: todayEnd } } }),
@@ -69,6 +71,8 @@ export default async function DashboardPage() {
     }),
     prisma.leetCodeProblem.findMany({ where: { date: { gte: last7Start } }, select: { id: true } }),
     prisma.macroTopic.findMany({ where: { coveredAt: { gte: last7Start } }, select: { id: true } }),
+    prisma.hydrationLog.findMany({ where: { date: { gte: todayStart, lte: todayEnd } }, select: { amountMl: true } }),
+    prisma.sleepLog.findMany({ where: { date: { gte: last7Start } }, select: { durationMin: true } }),
     getPortfolioHistory(30),
   ]);
 
@@ -130,12 +134,20 @@ export default async function DashboardPage() {
   const habitsKeptRatio =
     habitsWithLogs.length > 0 ? Math.min(1, habitKeptLast7 / (habitsWithLogs.length * 7)) : 0;
 
+  const hydrationMlToday = todayHydration.reduce((s, h) => s + h.amountMl, 0);
+  const sleepAvgMinThisWeek =
+    weekSleep.length > 0
+      ? weekSleep.reduce((s, l) => s + l.durationMin, 0) / weekSleep.length
+      : 0;
+
   const health = computeHealthScore({
     dietDaysLogged: dietDays.size,
     workoutsThisWeek: weekWorkouts.length,
     habitsKeptRatio,
     leetcodeCount: recentLeetcode.length,
     macroCount: recentMacro.length,
+    hydrationMlToday,
+    sleepAvgMinThisWeek,
   });
 
   const dayName = now.toLocaleDateString("en-US", { weekday: "long" }).toUpperCase();

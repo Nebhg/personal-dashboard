@@ -58,8 +58,14 @@ export const AREA_LABELS: Record<string, string> = {
   EXERCISE: "Exercise",
   LEARNING: "Learning",
   HABITS: "Habits",
+  SLEEP: "Sleep",
   SCHEDULE: "Schedule",
 };
+
+// Daily health goals (mirrors the hardcoded diet targets used in the UI).
+export const HYDRATION_GOAL_ML = 2000; // 8 glasses
+export const GLASS_ML = 250;
+export const SLEEP_GOAL_MIN = 480; // 8 hours
 
 export const SCHEDULE_CATEGORIES: Record<string, { label: string; color: string }> = {
   GYM:      { label: "Gym",      color: "#3b82f6" },

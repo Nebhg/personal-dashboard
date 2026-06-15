@@ -67,6 +67,13 @@ export default function ExercisePage() {
 
   useEffect(() => {
     refresh();
+    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", refresh);
+    };
   }, [refresh]);
 
   async function deletePlan(id: string) {

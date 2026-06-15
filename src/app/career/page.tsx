@@ -416,9 +416,20 @@ export default function CareerPage() {
   const [dragOverStage, setDragOverStage] = useState<ApplicationStage | null>(null);
   const dragAppRef = useRef<Application | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     fetch("/api/career", { cache: "no-store" }).then((r) => r.json()).then((data) => { setApps(data); setLoading(false); });
   }, []);
+
+  useEffect(() => {
+    load();
+    const onVisible = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", load);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", load);
+    };
+  }, [load]);
 
   const active = apps.filter((a) => BOARD_STAGES.includes(a.stage));
   const closed = apps.filter((a) => CLOSED_STAGES.includes(a.stage));

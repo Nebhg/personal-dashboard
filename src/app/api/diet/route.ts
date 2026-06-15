@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, createFreshPrismaClient } from "@/lib/prisma";
 import { mealSchema } from "@/lib/validations/diet";
 import { AREA_COLORS } from "@/types";
 
@@ -16,12 +16,16 @@ export async function GET(req: NextRequest) {
       }
     : {};
 
-  const meals = await prisma.mealLog.findMany({
-    where,
-    orderBy: { date: "desc" },
-  });
-
-  return NextResponse.json(meals);
+  const client = createFreshPrismaClient();
+  try {
+    const meals = await client.mealLog.findMany({
+      where,
+      orderBy: { date: "desc" },
+    });
+    return NextResponse.json(meals);
+  } finally {
+    await client.$disconnect();
+  }
 }
 
 export async function POST(req: NextRequest) {

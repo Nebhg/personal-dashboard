@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, createFreshPrismaClient } from "@/lib/prisma";
 import { workoutPlanSchema } from "@/lib/validations/exercise";
 import { pushWorkoutPlanToGCal } from "@/lib/gcal-sync";
 
 export async function GET() {
-  const plans = await prisma.workoutPlan.findMany({
-    include: { exercises: { orderBy: { order: "asc" } } },
-    orderBy: { createdAt: "desc" },
-  });
-  return NextResponse.json(plans);
+  const client = createFreshPrismaClient();
+  try {
+    const plans = await client.workoutPlan.findMany({
+      include: { exercises: { orderBy: { order: "asc" } } },
+      orderBy: { createdAt: "desc" },
+    });
+    return NextResponse.json(plans);
+  } finally {
+    await client.$disconnect();
+  }
 }
 
 export async function POST(req: Request) {

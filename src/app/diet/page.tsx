@@ -15,9 +15,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { MealPlanGrid } from "@/components/diet/MealPlanGrid";
-import { Plus, Utensils, Trash2, BookOpen, CalendarDays } from "lucide-react";
+import { HydrationTracker } from "@/components/diet/HydrationTracker";
+import { Plus, Utensils, Trash2, BookOpen, CalendarDays, Droplet } from "lucide-react";
 import { Topbar, AtlasBtn } from "@/components/ui/topbar";
 import { StatTile } from "@/components/ui/stat-tile";
+import { HYDRATION_GOAL_ML, GLASS_ML } from "@/types";
 import { format } from "date-fns";
 
 interface MealPlanEntry {
@@ -92,6 +94,16 @@ export default function DietPage() {
   const [newRecipeOpen, setNewRecipeOpen] = useState(false);
   const [logFromRecipe, setLogFromRecipe] = useState<Recipe | null>(null);
   const [logFromPlan, setLogFromPlan] = useState<{ description: string; recipe: Recipe | null; mealType: string } | null>(null);
+  const [hydrationMl, setHydrationMl] = useState(0);
+
+  const loadHydration = useCallback(async () => {
+    const today = format(new Date(), "yyyy-MM-dd");
+    const res = await fetch(`/api/hydration?date=${today}`);
+    if (res.ok) {
+      const logs: { amountMl: number }[] = await res.json();
+      setHydrationMl(logs.reduce((s, l) => s + l.amountMl, 0));
+    }
+  }, []);
 
   const loadMeals = useCallback(async () => {
     const res = await fetch("/api/diet");
@@ -108,11 +120,27 @@ export default function DietPage() {
     setMealPlanEntries(await res.json());
   }, []);
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
     loadMeals();
     loadRecipes();
     loadMealPlan();
-  }, [loadMeals, loadRecipes, loadMealPlan]);
+    loadHydration();
+  }, [loadMeals, loadRecipes, loadMealPlan, loadHydration]);
+
+  useEffect(() => {
+    refresh();
+    // Re-fetch when returning to the tab so out-of-band writes (e.g. meals
+    // logged via cowork/MCP) appear without a manual page reload.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [refresh]);
 
   async function deleteMeal(id: string) {
     if (!confirm("Delete this meal?")) return;
@@ -171,7 +199,7 @@ export default function DietPage() {
 
       <div className="px-4 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-10 lg:pb-16">
         {/* Stat tiles */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-4 lg:mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 lg:gap-4 mb-4 lg:mb-6">
           <StatTile
             label="Calories"
             num={totalToday > 0 ? totalToday.toLocaleString() : "—"}
@@ -200,6 +228,13 @@ export default function DietPage() {
             unit="/ 70g"
             sub={<span>{todayFat > 70 ? "slightly over" : `${Math.round((todayFat / 70) * 100)}% of goal`}</span>}
           />
+          <StatTile
+            label="Water"
+            num={hydrationMl > 0 ? +(hydrationMl / GLASS_ML).toFixed(1) : "—"}
+            unit={`/ ${HYDRATION_GOAL_ML / GLASS_ML} glasses`}
+            sub={<span>{(hydrationMl / 1000).toFixed(1)}L · {Math.round((hydrationMl / HYDRATION_GOAL_ML) * 100)}% of goal</span>}
+            sparkColor="oklch(0.78 0.13 220)"
+          />
         </div>
 
       <Tabs defaultValue="plan">
@@ -211,6 +246,10 @@ export default function DietPage() {
           <TabsTrigger value="log" className="gap-1.5">
             <Utensils className="h-3.5 w-3.5" />
             Meal Log
+          </TabsTrigger>
+          <TabsTrigger value="hydration" className="gap-1.5">
+            <Droplet className="h-3.5 w-3.5" />
+            Hydration
           </TabsTrigger>
           <TabsTrigger value="recipes" className="gap-1.5">
             <BookOpen className="h-3.5 w-3.5" />
@@ -231,6 +270,13 @@ export default function DietPage() {
               setLogFromPlan({ ...entry, recipe: fullRecipe });
             }}
           />
+        </TabsContent>
+
+        {/* ── HYDRATION TAB ─────────────────────────────── */}
+        <TabsContent value="hydration">
+          <div className="max-w-xl">
+            <HydrationTracker onUpdate={loadHydration} />
+          </div>
         </TabsContent>
 
         {/* ── MEAL LOG TAB ─────────────────────────────── */}

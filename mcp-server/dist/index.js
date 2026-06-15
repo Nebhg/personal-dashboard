@@ -1,4 +1,11 @@
-import "dotenv/config";
+import * as dotenv from "dotenv";
+import * as path from "path";
+import { fileURLToPath } from "url";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+// Load .env.local first (dashboard OAuth creds), then .env as fallback
+dotenv.config({ path: path.join(__dirname, "../.env.local") });
+dotenv.config({ path: path.join(__dirname, "../.env") });
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -6,7 +13,7 @@ import { createClient } from "@libsql/client";
 import { startOfDay, subDays, format } from "date-fns";
 import { randomUUID } from "crypto";
 import * as fs from "fs";
-import * as path from "path";
+import { google } from "googleapis";
 const TRACKER_MD_PATH = path.join(process.env.HOME ?? "~", "career_tracker", "tracker.md");
 const STAGE_LABELS = {
     APPLIED: "Applied", SCREEN: "Talent Screen", TECHNICAL: "Technical",
@@ -30,6 +37,7 @@ async function regenerateTrackerMd() {
             sections.push(`- **Next action:** ${a.nextAction ?? "—"}`);
             sections.push(`- **Prep needed:** ${a.prepNeeded ? "YES" : "NO"}${a.prepNotes ? ` — ${a.prepNotes}` : ""}`);
             sections.push(`- **Notes:** ${a.notes ?? "—"}`);
+            sections.push(`- **Job Description:** ${a.jobDescriptionPath ?? "[Paste JD here if progressed]"}`);
             sections.push("", "---", "");
         }
         sections.push("## CLOSED / INACTIVE", "");
@@ -56,6 +64,48 @@ async function regenerateTrackerMd() {
 }
 const dbUrl = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
 const db = createClient({ url: dbUrl });
+// ─── STARTUP MIGRATIONS ───────────────────────────────────────────────────────
+// Safely add new columns that may not exist in older DB snapshots.
+async function runStartupMigrations() {
+    const alterIfMissing = async (table, column, type) => {
+        try {
+            await db.execute(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${type}`);
+            console.error(`[migration] Added ${table}.${column}`);
+        }
+        catch {
+            // Column already exists — expected on subsequent starts
+        }
+    };
+    await alterIfMissing("JobApplication", "jobDescriptionPath", "TEXT");
+    await alterIfMissing("JobApplication", "jobDescription", "TEXT");
+    // Hydration + sleep tracking (safety net if the Prisma migration hasn't run).
+    try {
+        await db.execute(`CREATE TABLE IF NOT EXISTS "HydrationLog" (
+      "id" TEXT PRIMARY KEY NOT NULL,
+      "date" DATETIME NOT NULL,
+      "amountMl" INTEGER NOT NULL,
+      "notes" TEXT,
+      "createdAt" DATETIME NOT NULL,
+      "updatedAt" DATETIME NOT NULL
+    )`);
+        await db.execute(`CREATE TABLE IF NOT EXISTS "SleepLog" (
+      "id" TEXT PRIMARY KEY NOT NULL,
+      "date" DATETIME NOT NULL,
+      "bedTime" DATETIME NOT NULL,
+      "wakeTime" DATETIME NOT NULL,
+      "durationMin" INTEGER NOT NULL,
+      "quality" INTEGER,
+      "notes" TEXT,
+      "createdAt" DATETIME NOT NULL,
+      "updatedAt" DATETIME NOT NULL
+    )`);
+    }
+    catch (e) {
+        console.error("[migration] hydration/sleep table create error:", e);
+    }
+    await alterIfMissing("CalendarEvent", "sleepLogId", "TEXT");
+}
+runStartupMigrations().catch((e) => console.error("[migration] startup error:", e));
 function uid() {
     return randomUUID();
 }
@@ -108,19 +158,28 @@ server.tool("get_dashboard_summary", "Get a summary of today's and this week's a
     const now = new Date();
     const todayStart = startOfDay(now);
     const weekStart = subDays(todayStart, 7);
-    const [mealsRes, workoutsRes, sessionsRes, habitsRes, habitLogsRes] = await Promise.all([
+    const [mealsRes, workoutsRes, sessionsRes, habitsRes, habitLogsRes, hydrationRes, sleepRes] = await Promise.all([
         db.execute({ sql: `SELECT * FROM "MealLog" WHERE date >= ?`, args: [todayStart.toISOString()] }),
         db.execute({ sql: `SELECT * FROM "WorkoutSession" WHERE date >= ?`, args: [weekStart.toISOString()] }),
         db.execute({ sql: `SELECT * FROM "LearningSession" WHERE date >= ?`, args: [weekStart.toISOString()] }),
         db.execute({ sql: `SELECT * FROM "Habit"`, args: [] }),
         db.execute({ sql: `SELECT * FROM "HabitLog" WHERE date >= ?`, args: [weekStart.toISOString()] }),
+        db.execute({ sql: `SELECT * FROM "HydrationLog" WHERE date >= ?`, args: [todayStart.toISOString()] }),
+        db.execute({ sql: `SELECT * FROM "SleepLog" WHERE date >= ? ORDER BY date DESC`, args: [weekStart.toISOString()] }),
     ]);
     const meals = mealsRes.rows;
     const workouts = workoutsRes.rows;
     const sessions = sessionsRes.rows;
     const habits = habitsRes.rows;
     const habitLogs = habitLogsRes.rows;
+    const hydrationLogs = hydrationRes.rows;
+    const sleepLogs = sleepRes.rows;
     const todayCalories = meals.reduce((s, m) => s + (m.calories ?? 0), 0);
+    const todayMl = hydrationLogs.reduce((s, h) => s + (h.amountMl ?? 0), 0);
+    const lastNight = sleepLogs[0];
+    const sleepAvgMin = sleepLogs.length > 0
+        ? Math.round(sleepLogs.reduce((s, l) => s + (l.durationMin ?? 0), 0) / sleepLogs.length)
+        : 0;
     const habitData = habits.map((h) => {
         const logs = habitLogs
             .filter((l) => l.habitId === h.id)
@@ -138,6 +197,16 @@ server.tool("get_dashboard_summary", "Get a summary of today's and this week's a
                 text: JSON.stringify({
                     date: format(now, "yyyy-MM-dd"),
                     diet: { todayMeals: meals.length, todayCalories },
+                    hydration: {
+                        todayMl,
+                        goalMl: 2000,
+                        glasses: Math.round((todayMl / 250) * 10) / 10,
+                    },
+                    sleep: {
+                        lastNightMin: lastNight ? lastNight.durationMin : null,
+                        quality: lastNight ? (lastNight.quality ?? null) : null,
+                        avgMinThisWeek: sleepAvgMin,
+                    },
                     exercise: {
                         sessionsThisWeek: workouts.length,
                         totalMinutesThisWeek: workouts.reduce((s, w) => s + w.durationMin, 0),
@@ -175,6 +244,56 @@ server.tool("log_meal", "Log a meal to the diet tracker", {
         },
     ]);
     return { content: [{ type: "text", text: `Logged meal: ${mealId}` }] };
+});
+server.tool("log_hydration", "Log water / fluid intake. Provide either amountMl or glasses (1 glass = 250ml). Daily goal is 2000ml (8 glasses).", {
+    amountMl: z.number().optional().describe("Amount in millilitres"),
+    glasses: z.number().optional().describe("Number of 250ml glasses (converted to ml)"),
+    notes: z.string().optional(),
+}, async ({ amountMl, glasses, notes }) => {
+    const ml = amountMl ?? (glasses != null ? Math.round(glasses * 250) : null);
+    if (ml == null || ml <= 0) {
+        return { content: [{ type: "text", text: "Provide amountMl or glasses (a positive amount)." }] };
+    }
+    const now = new Date();
+    const logId = uid();
+    const isoNow = now.toISOString();
+    await db.execute({
+        sql: `INSERT INTO "HydrationLog" (id, date, amountMl, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`,
+        args: [logId, isoNow, ml, notes ?? null, isoNow, isoNow],
+    });
+    return { content: [{ type: "text", text: `Logged ${ml}ml water (${(ml / 250).toFixed(1)} glasses): ${logId}` }] };
+});
+server.tool("log_sleep", "Log a night's sleep. Provide bedTime and wakeTime as ISO timestamps (duration is computed), plus optional quality 1-10. Daily goal is 8 hours.", {
+    bedTime: z.string().describe("Bed time as ISO timestamp, e.g. 2026-06-14T23:00:00"),
+    wakeTime: z.string().describe("Wake time as ISO timestamp, e.g. 2026-06-15T07:00:00"),
+    quality: z.number().int().min(1).max(10).optional().describe("Sleep quality 1-10"),
+    notes: z.string().optional(),
+}, async ({ bedTime, wakeTime, quality, notes }) => {
+    const bed = new Date(bedTime);
+    const wake = new Date(wakeTime);
+    const durationMin = Math.round((wake.getTime() - bed.getTime()) / 60000);
+    if (isNaN(durationMin) || durationMin <= 0) {
+        return { content: [{ type: "text", text: "Invalid times: wakeTime must be after bedTime." }] };
+    }
+    const logId = uid();
+    const eventId = uid();
+    const isoNow = new Date().toISOString();
+    // The night belongs to the day you woke up.
+    const dateIso = startOfDay(wake).toISOString();
+    const hours = Math.floor(durationMin / 60);
+    const mins = durationMin % 60;
+    const qualityStr = quality ? ` · quality ${quality}/10` : "";
+    await db.batch([
+        {
+            sql: `INSERT INTO "SleepLog" (id, date, bedTime, wakeTime, durationMin, quality, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [logId, dateIso, bed.toISOString(), wake.toISOString(), durationMin, quality ?? null, notes ?? null, isoNow, isoNow],
+        },
+        {
+            sql: `INSERT INTO "CalendarEvent" (id, title, start, end, allDay, area, color, description, mealLogId, workoutSessionId, learningSessionId, habitLogId, scheduleBlockId, sleepLogId, createdAt, updatedAt) VALUES (?, ?, ?, ?, 0, 'SLEEP', '#64748b', NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`,
+            args: [eventId, `Sleep: ${hours}h ${mins}m${qualityStr}`, bed.toISOString(), wake.toISOString(), logId, isoNow, isoNow],
+        },
+    ]);
+    return { content: [{ type: "text", text: `Logged sleep ${hours}h ${mins}m${qualityStr}: ${logId}` }] };
 });
 server.tool("log_workout", "Log a workout session", {
     name: z.string().describe("Workout name, e.g. 'Upper body push'"),
@@ -755,7 +874,7 @@ server.tool("get_applications", "Get all job applications. Optionally filter to 
     const summary = apps.map((a) => `${a.firm}${a.role ? ` (${a.role})` : ""} — ${a.stage}${a.nextAction ? ` | Next: ${a.nextAction}` : ""}${a.prepNeeded ? " ⚠️ PREP NEEDED" : ""}`).join("\n");
     return { content: [{ type: "text", text: apps.length === 0 ? "No applications found." : `${apps.length} application(s):\n\n${summary}` }] };
 });
-server.tool("add_application", "Add a new job application to the career pipeline.", {
+server.tool("add_application", "Add a new job application to the career pipeline. IMPORTANT: jobDescription is REQUIRED — always ask the user to provide the full JD text before calling this tool. Do not create an application without it.", {
     firm: z.string().describe("Company name e.g. 'B2C2'"),
     role: z.string().optional().describe("Role title e.g. 'Quant Developer'"),
     stage: z.enum(["APPLIED", "SCREEN", "TECHNICAL", "FINAL", "OFFER", "REJECTED", "GHOSTED"]).optional().describe("Current stage, defaults to APPLIED"),
@@ -765,18 +884,24 @@ server.tool("add_application", "Add a new job application to the career pipeline
     prepNeeded: z.boolean().optional().describe("Whether prep is needed for next stage"),
     prepNotes: z.string().optional().describe("What specifically to prepare"),
     notes: z.string().optional().describe("General notes about this application"),
-}, async ({ firm, role, stage, appliedDate, lastAction, nextAction, prepNeeded, prepNotes, notes }) => {
+    jobDescriptionPath: z.string().optional().describe("Relative path to JD markdown file e.g. 'JDs/BofA_JD.md'"),
+    jobDescription: z.string().describe("REQUIRED: Full text of the job description. Do not call this tool without it."),
+}, async ({ firm, role, stage, appliedDate, lastAction, nextAction, prepNeeded, prepNotes, notes, jobDescriptionPath, jobDescription }) => {
+    // JD is required — guard against empty string being passed
+    if (!jobDescription || jobDescription.trim().length < 50) {
+        return { content: [{ type: "text", text: `❌ Cannot add application without a job description. Please provide the full JD text for ${firm} before creating this entry. Paste the JD, then call add_application again with jobDescription set.` }] };
+    }
     const isoNow = new Date().toISOString();
     const id = uid();
     const isoApplied = appliedDate ? new Date(appliedDate + "T00:00:00.000Z").toISOString() : null;
     await db.execute({
-        sql: `INSERT INTO "JobApplication" (id, firm, role, stage, appliedDate, lastAction, nextAction, prepNeeded, prepNotes, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [id, firm, role ?? null, stage ?? "APPLIED", isoApplied, lastAction ?? null, nextAction ?? null, prepNeeded ? 1 : 0, prepNotes ?? null, notes ?? null, isoNow, isoNow],
+        sql: `INSERT INTO "JobApplication" (id, firm, role, stage, appliedDate, lastAction, nextAction, prepNeeded, prepNotes, notes, jobDescriptionPath, jobDescription, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [id, firm, role ?? null, stage ?? "APPLIED", isoApplied, lastAction ?? null, nextAction ?? null, prepNeeded ? 1 : 0, prepNotes ?? null, notes ?? null, jobDescriptionPath ?? null, jobDescription ?? null, isoNow, isoNow],
     });
     await regenerateTrackerMd();
     return { content: [{ type: "text", text: `Added ${firm}${role ? ` — ${role}` : ""} at stage ${stage ?? "APPLIED"}. tracker.md updated.` }] };
 });
-server.tool("update_application", "Update an existing job application — change stage, log an action, set next steps, flag prep needed.", {
+server.tool("update_application", "Update an existing job application — change stage, log an action, set next steps, flag prep needed, or attach a job description.", {
     firm: z.string().describe("Firm name to identify the application (partial match, case-insensitive)"),
     stage: z.enum(["APPLIED", "SCREEN", "TECHNICAL", "FINAL", "OFFER", "REJECTED", "GHOSTED"]).optional(),
     lastAction: z.string().optional().describe("What just happened e.g. 'HackerRank completed 2026-04-21'"),
@@ -784,7 +909,9 @@ server.tool("update_application", "Update an existing job application — change
     prepNeeded: z.boolean().optional(),
     prepNotes: z.string().optional(),
     notes: z.string().optional(),
-}, async ({ firm, stage, lastAction, nextAction, prepNeeded, prepNotes, notes }) => {
+    jobDescriptionPath: z.string().optional().describe("Relative path to JD markdown file e.g. 'JDs/BofA_JD.md'"),
+    jobDescription: z.string().optional().describe("Full text of the job description"),
+}, async ({ firm, stage, lastAction, nextAction, prepNeeded, prepNotes, notes, jobDescriptionPath, jobDescription }) => {
     const existing = await db.execute({
         sql: `SELECT id, firm, role FROM "JobApplication" WHERE firm LIKE ? ORDER BY updatedAt DESC LIMIT 1`,
         args: [`%${firm}%`],
@@ -819,6 +946,14 @@ server.tool("update_application", "Update an existing job application — change
     if (notes !== undefined) {
         updates.push("notes = ?");
         args.push(notes ?? null);
+    }
+    if (jobDescriptionPath !== undefined) {
+        updates.push("jobDescriptionPath = ?");
+        args.push(jobDescriptionPath ?? null);
+    }
+    if (jobDescription !== undefined) {
+        updates.push("jobDescription = ?");
+        args.push(jobDescription ?? null);
     }
     args.push(app.id);
     await db.execute({ sql: `UPDATE "JobApplication" SET ${updates.join(", ")} WHERE id = ?`, args });
@@ -1042,6 +1177,389 @@ server.tool("update_macro_topic", "Update the level of an existing macro topic (
     await db.execute({ sql: `UPDATE "MacroTopic" SET ${updates.join(", ")} WHERE id = ?`, args });
     await regenerateMacroProgress();
     return { content: [{ type: "text", text: `Updated "${row.topic}" → ${MACRO_LEVEL_EMOJI[level]} ${level}. progress.md updated.` }] };
+});
+// ─── GOOGLE CALENDAR ──────────────────────────────────────────────────────────
+function getGCalClient() {
+    const oauth2 = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+    oauth2.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
+    return google.calendar({ version: "v3", auth: oauth2 });
+}
+const GCAL_DAY_NAMES = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+function buildRRule(daysOfWeek, endsOn) {
+    const byDay = daysOfWeek.map((d) => GCAL_DAY_NAMES[d]).join(",");
+    let rule = `RRULE:FREQ=WEEKLY;BYDAY=${byDay}`;
+    if (endsOn) {
+        const until = new Date(endsOn).toISOString().replace(/[-:.]/g, "").slice(0, 15) + "Z";
+        rule += `;UNTIL=${until}`;
+    }
+    return rule;
+}
+/** Find the next (or today's) date matching one of the given days, combined with a HH:MM time. */
+function nextOccurrenceISO(daysOfWeek, timeStr) {
+    const now = new Date();
+    const todayDow = now.getDay();
+    const sorted = [...daysOfWeek].sort((a, b) => a - b);
+    const targetDow = sorted.find((d) => d >= todayDow) ?? sorted[0];
+    const daysAhead = ((targetDow - todayDow) + 7) % 7;
+    const date = new Date(now);
+    date.setDate(date.getDate() + daysAhead);
+    const [hh, mm] = timeStr.split(":").map(Number);
+    date.setHours(hh, mm, 0, 0);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(hh)}:${pad(mm)}:00`;
+}
+server.tool("list_google_calendar_events", "List upcoming Google Calendar events. Defaults to the next 7 days.", {
+    from: z.string().optional().describe("Start date YYYY-MM-DD (default: today)"),
+    to: z.string().optional().describe("End date YYYY-MM-DD (default: 7 days from now)"),
+    maxResults: z.number().int().optional().default(25).describe("Max events to return (default 25)"),
+}, async ({ from, to, maxResults }) => {
+    try {
+        const cal = getGCalClient();
+        const timeMin = from ? new Date(from).toISOString() : new Date().toISOString();
+        const timeMax = to
+            ? new Date(to + "T23:59:59").toISOString()
+            : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const res = await cal.events.list({
+            calendarId: "primary",
+            timeMin,
+            timeMax,
+            singleEvents: true,
+            orderBy: "startTime",
+            maxResults: maxResults ?? 25,
+        });
+        const events = (res.data.items ?? []).map((e) => {
+            const allDay = !!e.start?.date;
+            return {
+                id: e.id,
+                title: e.summary ?? "(no title)",
+                start: allDay ? e.start?.date : e.start?.dateTime,
+                end: allDay ? e.end?.date : e.end?.dateTime,
+                allDay,
+                location: e.location ?? null,
+                description: e.description ?? null,
+                recurring: !!e.recurringEventId,
+            };
+        });
+        if (events.length === 0) {
+            return { content: [{ type: "text", text: "No events found in that range." }] };
+        }
+        const lines = events.map((e) => `[${e.id}] ${e.start?.slice(0, 16).replace("T", " ")} — ${e.title}${e.location ? ` @ ${e.location}` : ""}${e.recurring ? " 🔁" : ""}`);
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+    }
+    catch (err) {
+        return { content: [{ type: "text", text: `Error: ${String(err)}` }] };
+    }
+});
+server.tool("create_google_calendar_event", "Create a one-off Google Calendar event. Use create_recurring_google_calendar_event for weekly repeating events.", {
+    title: z.string().describe("Event title"),
+    start: z.string().describe("Start as ISO datetime (2026-05-01T19:00:00) or date only (2026-05-01) for all-day"),
+    end: z.string().describe("End as ISO datetime or date only. For all-day, use the same date or day after."),
+    allDay: z.boolean().optional().default(false),
+    description: z.string().optional(),
+    location: z.string().optional(),
+    colorId: z.string().optional().describe("1=lavender 2=sage 3=grape 4=flamingo 5=banana 6=tangerine 7=peacock 8=graphite 9=blueberry 10=basil 11=tomato"),
+}, async ({ title, start, end, allDay, description, location, colorId }) => {
+    try {
+        const cal = getGCalClient();
+        const res = await cal.events.insert({
+            calendarId: "primary",
+            requestBody: {
+                summary: title,
+                description: description || undefined,
+                location: location || undefined,
+                colorId: colorId || undefined,
+                start: allDay ? { date: start.split("T")[0] } : { dateTime: start, timeZone: "Europe/London" },
+                end: allDay ? { date: end.split("T")[0] } : { dateTime: end, timeZone: "Europe/London" },
+            },
+        });
+        const ev = res.data;
+        const startStr = ev.start?.dateTime ?? ev.start?.date ?? start;
+        return { content: [{ type: "text", text: `Created "${title}" on ${startStr.slice(0, 16).replace("T", " ")} (ID: ${ev.id})` }] };
+    }
+    catch (err) {
+        return { content: [{ type: "text", text: `Error: ${String(err)}` }] };
+    }
+});
+server.tool("create_recurring_google_calendar_event", "Create a weekly recurring Google Calendar event — gym sessions, work blocks, routines, etc.", {
+    title: z.string().describe("Event title e.g. 'Morning gym', 'MCL stretching'"),
+    daysOfWeek: z.array(z.number().int().min(0).max(6)).describe("Days to repeat: 0=Sun 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat"),
+    startTime: z.string().describe("Start time HH:MM e.g. '07:00'"),
+    endTime: z.string().describe("End time HH:MM e.g. '08:00'"),
+    description: z.string().optional(),
+    location: z.string().optional(),
+    endsOn: z.string().optional().describe("Date to stop recurring YYYY-MM-DD. Omit for indefinite."),
+    colorId: z.string().optional().describe("1=lavender 2=sage 3=grape 4=flamingo 5=banana 6=tangerine 7=peacock 8=graphite 9=blueberry 10=basil 11=tomato"),
+}, async ({ title, daysOfWeek, startTime, endTime, description, location, endsOn, colorId }) => {
+    if (daysOfWeek.length === 0) {
+        return { content: [{ type: "text", text: "Error: daysOfWeek must not be empty." }] };
+    }
+    try {
+        const cal = getGCalClient();
+        const startISO = nextOccurrenceISO(daysOfWeek, startTime);
+        const endISO = nextOccurrenceISO(daysOfWeek, endTime);
+        const rrule = buildRRule(daysOfWeek, endsOn);
+        const res = await cal.events.insert({
+            calendarId: "primary",
+            requestBody: {
+                summary: title,
+                description: description || undefined,
+                location: location || undefined,
+                colorId: colorId || undefined,
+                recurrence: [rrule],
+                start: { dateTime: startISO, timeZone: "Europe/London" },
+                end: { dateTime: endISO, timeZone: "Europe/London" },
+            },
+        });
+        const dayStr = daysOfWeek.map((d) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]).join(", ");
+        return { content: [{ type: "text", text: `Created recurring event "${title}" every ${dayStr} ${startTime}–${endTime}${endsOn ? ` until ${endsOn}` : ""}. ID: ${res.data.id}` }] };
+    }
+    catch (err) {
+        return { content: [{ type: "text", text: `Error: ${String(err)}` }] };
+    }
+});
+server.tool("update_google_calendar_event", "Update an existing Google Calendar event — change title, time, description, location, or colour. Use list_google_calendar_events to find the event ID.", {
+    eventId: z.string().describe("Google Calendar event ID"),
+    title: z.string().optional().describe("New title"),
+    start: z.string().optional().describe("New start ISO datetime or date"),
+    end: z.string().optional().describe("New end ISO datetime or date"),
+    allDay: z.boolean().optional(),
+    description: z.string().optional(),
+    location: z.string().optional(),
+    colorId: z.string().optional().describe("1=lavender 2=sage 3=grape 4=flamingo 5=banana 6=tangerine 7=peacock 8=graphite 9=blueberry 10=basil 11=tomato"),
+}, async ({ eventId, title, start, end, allDay, description, location, colorId }) => {
+    try {
+        const cal = getGCalClient();
+        const patch = {};
+        if (title !== undefined)
+            patch.summary = title;
+        if (description !== undefined)
+            patch.description = description;
+        if (location !== undefined)
+            patch.location = location;
+        if (colorId !== undefined)
+            patch.colorId = colorId;
+        if (start !== undefined) {
+            patch.start = allDay ? { date: start.split("T")[0] } : { dateTime: start, timeZone: "Europe/London" };
+        }
+        if (end !== undefined) {
+            patch.end = allDay ? { date: end.split("T")[0] } : { dateTime: end, timeZone: "Europe/London" };
+        }
+        await cal.events.patch({ calendarId: "primary", eventId, requestBody: patch });
+        return { content: [{ type: "text", text: `Updated event ${eventId}${title ? ` — now titled "${title}"` : ""}` }] };
+    }
+    catch (err) {
+        return { content: [{ type: "text", text: `Error: ${String(err)}` }] };
+    }
+});
+server.tool("delete_google_calendar_event", "Delete a Google Calendar event by ID. Use list_google_calendar_events to find the ID first.", {
+    eventId: z.string().describe("Google Calendar event ID to delete"),
+}, async ({ eventId }) => {
+    try {
+        const cal = getGCalClient();
+        await cal.events.delete({ calendarId: "primary", eventId });
+        return { content: [{ type: "text", text: `Deleted event ${eventId}` }] };
+    }
+    catch (err) {
+        return { content: [{ type: "text", text: `Error: ${String(err)}` }] };
+    }
+});
+// ─── INVESTMENTS ──────────────────────────────────────────────────────────────
+server.tool("get_investments", "Get all investment accounts and their holdings with current values and P&L. Automatically refreshes prices from Yahoo Finance before reading.", {}, async () => {
+    try {
+        // Refresh live prices via the dashboard API and write back to DB
+        try {
+            const priceResp = await fetch("http://localhost:3000/api/investments/prices");
+            const priceData = await priceResp.json();
+            if (priceData.prices && !priceData.error) {
+                await fetch("http://localhost:3000/api/investments/prices", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ prices: Object.fromEntries(Object.entries(priceData.prices).map(([id, p]) => [id, { price: p.price, valueGbp: p.valueGbp }])) }),
+                });
+            }
+        }
+        catch {
+            // Dashboard API unreachable — continue with last saved prices
+        }
+        const accounts = await db.execute(`SELECT * FROM "InvestmentAccount" ORDER BY name`);
+        const holdings = await db.execute(`SELECT * FROM "InvestmentHolding" ORDER BY accountId, name`);
+        const lines = [];
+        for (const acc of accounts.rows) {
+            const accHoldings = holdings.rows.filter((h) => h.accountId === acc.id);
+            const totalValueGbp = accHoldings.reduce((s, h) => s + (h.valueGbp ?? 0), 0);
+            const totalCostGbp = accHoldings.reduce((s, h) => s + (h.costGbp ?? 0), 0);
+            const totalReturnPct = totalCostGbp > 0 ? ((totalValueGbp - totalCostGbp) / totalCostGbp) * 100 : 0;
+            lines.push(`## ${acc.name} (${acc.accountType})`);
+            if (acc.cashBalanceGbp)
+                lines.push(`  Cash: £${acc.cashBalanceGbp.toFixed(2)}${acc.interestRate ? ` @ ${acc.interestRate}% p.a.` : ""}`);
+            if (acc.isaAllowanceUsed)
+                lines.push(`  ISA allowance used: £${acc.isaAllowanceUsed.toFixed(2)}`);
+            if (accHoldings.length > 0) {
+                lines.push(`  Holdings (${accHoldings.length}): total value £${totalValueGbp.toFixed(2)}, cost £${totalCostGbp.toFixed(2)}, return ${totalReturnPct >= 0 ? "+" : ""}${totalReturnPct.toFixed(1)}%`);
+                for (const h of accHoldings) {
+                    const retGbp = (h.valueGbp ?? 0) - h.costGbp;
+                    const retPct = h.costGbp > 0 ? (retGbp / h.costGbp) * 100 : 0;
+                    lines.push(`  - ${h.name}${h.ticker ? ` (${h.ticker})` : ""}: qty ${h.quantity}, last £${h.lastPrice ?? "?"} ${h.priceCurrency}, value £${h.valueGbp?.toFixed(2) ?? "?"}, cost £${h.costGbp.toFixed(2)}, return ${retPct >= 0 ? "+" : ""}${retPct.toFixed(1)}%`);
+                }
+            }
+            else {
+                lines.push(`  No holdings`);
+            }
+            lines.push("");
+        }
+        return { content: [{ type: "text", text: lines.join("\n") || "No accounts found." }] };
+    }
+    catch (err) {
+        return { content: [{ type: "text", text: `Error: ${String(err)}` }] };
+    }
+});
+server.tool("add_holding", "Add a new holding to an investment account. Creates the account if it doesn't exist yet.", {
+    accountName: z.string().describe("Account name, e.g. 'Trading 212 Stocks ISA' or 'Trading 212 Invest'"),
+    accountType: z.string().optional().describe("ISA_STOCKS | INVEST | SIPP | OTHER — only needed if creating account"),
+    broker: z.string().optional().describe("Broker name, e.g. 'Trading 212' — only needed if creating account"),
+    name: z.string().describe("Full holding name, e.g. 'Advanced Micro Devices Inc'"),
+    ticker: z.string().optional().describe("Ticker symbol, e.g. 'AMD'"),
+    quantity: z.number().describe("Number of shares/units held"),
+    costGbp: z.number().describe("Total cost basis in GBP"),
+    lastPrice: z.number().optional().describe("Last known price in the stock's trading currency"),
+    priceCurrency: z.string().optional().describe("Currency the stock trades in, e.g. 'USD' (default: USD)"),
+    valueGbp: z.number().optional().describe("Current total value in GBP"),
+    notes: z.string().optional(),
+}, async ({ accountName, accountType, broker, name, ticker, quantity, costGbp, lastPrice, priceCurrency, valueGbp, notes }) => {
+    try {
+        // Find or create account
+        let acc = (await db.execute({ sql: `SELECT * FROM "InvestmentAccount" WHERE name = ? LIMIT 1`, args: [accountName] })).rows[0];
+        if (!acc) {
+            const accId = uid();
+            await db.execute({
+                sql: `INSERT INTO "InvestmentAccount" (id, name, broker, accountType, cashBalanceGbp, createdAt, updatedAt) VALUES (?, ?, ?, ?, 0, datetime('now'), datetime('now'))`,
+                args: [accId, accountName, broker ?? "Unknown", accountType ?? "OTHER"],
+            });
+            acc = (await db.execute({ sql: `SELECT * FROM "InvestmentAccount" WHERE id = ? LIMIT 1`, args: [accId] })).rows[0];
+        }
+        const holdingId = uid();
+        await db.execute({
+            sql: `INSERT INTO "InvestmentHolding" (id, accountId, name, ticker, quantity, costGbp, lastPrice, priceCurrency, valueGbp, notes, createdAt, updatedAt)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+            args: [holdingId, acc.id, name, ticker ?? null, quantity, costGbp, lastPrice ?? null, priceCurrency ?? "USD", valueGbp ?? null, notes ?? null],
+        });
+        return { content: [{ type: "text", text: `Added ${name}${ticker ? ` (${ticker})` : ""} to ${accountName}: qty ${quantity}, cost £${costGbp}${valueGbp ? `, current value £${valueGbp}` : ""}` }] };
+    }
+    catch (err) {
+        return { content: [{ type: "text", text: `Error: ${String(err)}` }] };
+    }
+});
+server.tool("update_holding", "Update an existing holding — price, value, quantity, or cost basis. Use get_investments to find holding names.", {
+    accountName: z.string().describe("Account the holding belongs to"),
+    name: z.string().describe("Holding name as stored (partial match OK)"),
+    quantity: z.number().optional(),
+    costGbp: z.number().optional().describe("Updated cost basis in GBP"),
+    lastPrice: z.number().optional().describe("Updated last price in trading currency"),
+    priceCurrency: z.string().optional(),
+    valueGbp: z.number().optional().describe("Updated total value in GBP"),
+    notes: z.string().optional(),
+}, async ({ accountName, name, quantity, costGbp, lastPrice, priceCurrency, valueGbp, notes }) => {
+    try {
+        const acc = (await db.execute({ sql: `SELECT * FROM "InvestmentAccount" WHERE name = ? LIMIT 1`, args: [accountName] })).rows[0];
+        if (!acc)
+            return { content: [{ type: "text", text: `Account "${accountName}" not found` }] };
+        const holding = (await db.execute({ sql: `SELECT * FROM "InvestmentHolding" WHERE accountId = ? AND name LIKE ? LIMIT 1`, args: [acc.id, `%${name}%`] })).rows[0];
+        if (!holding)
+            return { content: [{ type: "text", text: `Holding matching "${name}" not found in ${accountName}` }] };
+        const updates = [];
+        const args = [];
+        if (quantity !== undefined) {
+            updates.push(`quantity = ?`);
+            args.push(quantity);
+        }
+        if (costGbp !== undefined) {
+            updates.push(`costGbp = ?`);
+            args.push(costGbp);
+        }
+        if (lastPrice !== undefined) {
+            updates.push(`lastPrice = ?`);
+            args.push(lastPrice);
+        }
+        if (priceCurrency !== undefined) {
+            updates.push(`priceCurrency = ?`);
+            args.push(priceCurrency);
+        }
+        if (valueGbp !== undefined) {
+            updates.push(`valueGbp = ?`);
+            args.push(valueGbp);
+        }
+        if (notes !== undefined) {
+            updates.push(`notes = ?`);
+            args.push(notes);
+        }
+        if (updates.length === 0)
+            return { content: [{ type: "text", text: "Nothing to update" }] };
+        updates.push(`updatedAt = datetime('now')`);
+        args.push(holding.id);
+        await db.execute({ sql: `UPDATE "InvestmentHolding" SET ${updates.join(", ")} WHERE id = ?`, args });
+        return { content: [{ type: "text", text: `Updated ${holding.name}${valueGbp !== undefined ? ` — value now £${valueGbp}` : ""}${lastPrice !== undefined ? `, last price ${lastPrice}` : ""}` }] };
+    }
+    catch (err) {
+        return { content: [{ type: "text", text: `Error: ${String(err)}` }] };
+    }
+});
+server.tool("delete_holding", "Remove a holding from an investment account.", {
+    accountName: z.string().describe("Account the holding belongs to"),
+    name: z.string().describe("Holding name (partial match OK)"),
+}, async ({ accountName, name }) => {
+    try {
+        const acc = (await db.execute({ sql: `SELECT * FROM "InvestmentAccount" WHERE name = ? LIMIT 1`, args: [accountName] })).rows[0];
+        if (!acc)
+            return { content: [{ type: "text", text: `Account "${accountName}" not found` }] };
+        const holding = (await db.execute({ sql: `SELECT * FROM "InvestmentHolding" WHERE accountId = ? AND name LIKE ? LIMIT 1`, args: [acc.id, `%${name}%`] })).rows[0];
+        if (!holding)
+            return { content: [{ type: "text", text: `Holding matching "${name}" not found in ${accountName}` }] };
+        await db.execute({ sql: `DELETE FROM "InvestmentHolding" WHERE id = ?`, args: [holding.id] });
+        return { content: [{ type: "text", text: `Deleted ${holding.name} from ${accountName}` }] };
+    }
+    catch (err) {
+        return { content: [{ type: "text", text: `Error: ${String(err)}` }] };
+    }
+});
+server.tool("update_account", "Update account-level data: cash balance, ISA allowance used, interest rate.", {
+    accountName: z.string().describe("Account name, e.g. 'Trading 212 Stocks ISA'"),
+    cashBalanceGbp: z.number().optional(),
+    interestRate: z.number().optional().describe("Annual interest rate on uninvested cash, e.g. 3.5"),
+    isaAllowanceUsed: z.number().optional().describe("GBP used of annual ISA allowance"),
+    notes: z.string().optional(),
+}, async ({ accountName, cashBalanceGbp, interestRate, isaAllowanceUsed, notes }) => {
+    try {
+        const acc = (await db.execute({ sql: `SELECT * FROM "InvestmentAccount" WHERE name = ? LIMIT 1`, args: [accountName] })).rows[0];
+        if (!acc)
+            return { content: [{ type: "text", text: `Account "${accountName}" not found` }] };
+        const updates = [];
+        const args = [];
+        if (cashBalanceGbp !== undefined) {
+            updates.push(`cashBalanceGbp = ?`);
+            args.push(cashBalanceGbp);
+        }
+        if (interestRate !== undefined) {
+            updates.push(`interestRate = ?`);
+            args.push(interestRate);
+        }
+        if (isaAllowanceUsed !== undefined) {
+            updates.push(`isaAllowanceUsed = ?`);
+            args.push(isaAllowanceUsed);
+        }
+        if (notes !== undefined) {
+            updates.push(`notes = ?`);
+            args.push(notes);
+        }
+        if (updates.length === 0)
+            return { content: [{ type: "text", text: "Nothing to update" }] };
+        updates.push(`updatedAt = datetime('now')`);
+        args.push(acc.id);
+        await db.execute({ sql: `UPDATE "InvestmentAccount" SET ${updates.join(", ")} WHERE id = ?`, args });
+        return { content: [{ type: "text", text: `Updated ${accountName}` }] };
+    }
+    catch (err) {
+        return { content: [{ type: "text", text: `Error: ${String(err)}` }] };
+    }
 });
 // ─── START SERVER ─────────────────────────────────────────────────────────────
 async function main() {
