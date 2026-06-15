@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { RefreshCw, Plus, Pencil, Trash2, ChevronDown, ChevronRight, Wallet, Wifi, WifiOff } from "lucide-react";
+import { RefreshCw, Plus, Pencil, Trash2, ChevronDown, ChevronRight, Wallet, Wifi, WifiOff, Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Topbar, AtlasBtn } from "@/components/ui/topbar";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -233,11 +233,13 @@ function AddHoldingDialog({
 function HoldingRow({
   holding,
   livePrice,
+  privacy,
   onUpdate,
   onDelete,
 }: {
   holding: Holding;
   livePrice?: LivePrice;
+  privacy: boolean;
   onUpdate: (id: string, data: Partial<Holding>) => void;
   onDelete: (id: string) => void;
 }) {
@@ -295,10 +297,10 @@ function HoldingRow({
     <tr className="border-t border-border/30 hover:bg-muted/30 transition-colors group">
       <td className="py-2.5 px-3 text-xs font-mono font-medium">{holding.ticker ?? "—"}</td>
       <td className="py-2.5 px-3 text-xs text-muted-foreground max-w-48 truncate">{holding.name}</td>
-      <td className="py-2.5 px-3 text-xs text-right tabular-nums">{holding.quantity}</td>
+      <td className="py-2.5 px-3 text-xs text-right tabular-nums">{privacy ? "•••" : holding.quantity}</td>
       <td className="py-2.5 px-3 text-xs text-right tabular-nums">
         <div className={livePrice ? "text-foreground" : "text-muted-foreground"}>
-          {displayPrice != null ? `${displayPrice.toFixed(2)} ${holding.priceCurrency}` : "—"}
+          {privacy ? "•••••" : displayPrice != null ? `${displayPrice.toFixed(2)} ${holding.priceCurrency}` : "—"}
         </div>
         {livePrice?.changePercent != null && (
           <div className={cn("text-xs tabular-nums", plColor(livePrice.changePercent))}>
@@ -307,11 +309,11 @@ function HoldingRow({
         )}
       </td>
       <td className="py-2.5 px-3 text-xs text-right tabular-nums font-medium">
-        {displayValue != null ? `£${fmt(displayValue)}` : "—"}
+        {privacy ? "•••••" : displayValue != null ? `£${fmt(displayValue)}` : "—"}
       </td>
-      <td className="py-2.5 px-3 text-xs text-right tabular-nums text-muted-foreground">£{fmt(holding.costGbp)}</td>
+      <td className="py-2.5 px-3 text-xs text-right tabular-nums text-muted-foreground">{privacy ? "•••••" : `£${fmt(holding.costGbp)}`}</td>
       <td className={cn("py-2.5 px-3 text-xs text-right tabular-nums font-medium", plColor(pl))}>
-        {pl >= 0 ? "+" : ""}£{fmt(pl)}
+        {privacy ? "•••••" : `${pl >= 0 ? "+" : ""}£${fmt(pl)}`}
       </td>
       <td className={cn("py-2.5 px-3 text-xs text-right tabular-nums", plColor(plPct))}>
         {pl >= 0 ? "+" : ""}{plPct.toFixed(1)}%
@@ -335,6 +337,7 @@ function HoldingRow({
 function AccountCard({
   account,
   livePrices,
+  privacy,
   onUpdateAccount,
   onUpdateHolding,
   onDeleteHolding,
@@ -342,6 +345,7 @@ function AccountCard({
 }: {
   account: Account;
   livePrices?: Record<string, LivePrice>;
+  privacy: boolean;
   onUpdateAccount: (id: string, data: Partial<Account>) => void;
   onUpdateHolding: (id: string, data: Partial<Holding>) => void;
   onDeleteHolding: (id: string) => void;
@@ -382,30 +386,30 @@ function AccountCard({
                   {ACCOUNT_TYPE_LABELS[account.accountType] ?? account.accountType}
                 </span>
               </div>
-              <p className="text-2xl font-bold tabular-nums">£{fmt(totalValue)}</p>
+              <p className="text-2xl font-bold tabular-nums">{privacy ? "•••••" : `£${fmt(totalValue)}`}</p>
               {account.holdings.length > 0 && (
                 <p className={cn("text-sm font-medium tabular-nums", plColor(pl))}>
-                  {pl >= 0 ? "+" : ""}£{fmt(pl)} ({pl >= 0 ? "+" : ""}{pct.toFixed(2)}%) on holdings
+                  {privacy ? "•••••" : `${pl >= 0 ? "+" : ""}£${fmt(pl)}`} ({pl >= 0 ? "+" : ""}{pct.toFixed(2)}%) on holdings
                 </p>
               )}
             </div>
             <div className="text-right shrink-0">
               {account.cashBalanceGbp > 0 && (
                 <div className="text-xs text-muted-foreground">
-                  <div>Cash: <span className="font-medium text-foreground">£{fmt(account.cashBalanceGbp)}</span></div>
+                  <div>Cash: <span className="font-medium text-foreground">{privacy ? "•••••" : `£${fmt(account.cashBalanceGbp)}`}</span></div>
                   {account.totalReturnGbp != null && (
                     <div className={cn("font-medium", account.totalReturnGbp >= 0 ? "text-emerald-400" : "text-red-400")}>
-                      Earned: +£{fmt(account.totalReturnGbp)}
+                      {privacy ? "•••••" : `Earned: +£${fmt(account.totalReturnGbp)}`}
                     </div>
                   )}
                   {account.interestRate && (
-                    <div className="text-muted-foreground/70">~£{fmt(annualInterest)} p.a. projected</div>
+                    <div className="text-muted-foreground/70">{privacy ? "•••••" : `~£${fmt(annualInterest)} p.a. projected`}</div>
                   )}
                 </div>
               )}
               {account.isaAllowanceUsed != null && (
                 <div className="text-xs text-muted-foreground mt-1">
-                  ISA used: £{fmt(account.isaAllowanceUsed)} / £20,000
+                  ISA used: {privacy ? "•••••" : `£${fmt(account.isaAllowanceUsed)}`} / £20,000
                 </div>
               )}
             </div>
@@ -459,7 +463,7 @@ function AccountCard({
               className="flex items-center gap-1.5 px-4 py-2.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-full border-b border-border/30"
             >
               {holdingsOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-              {account.holdings.length} holding{account.holdings.length !== 1 ? "s" : ""} · cost £{fmt(holdingsCost)} · value £{fmt(holdingsValue)}
+              {account.holdings.length} holding{account.holdings.length !== 1 ? "s" : ""} · cost {privacy ? "•••••" : `£${fmt(holdingsCost)}`} · value {privacy ? "•••••" : `£${fmt(holdingsValue)}`}
             </button>
 
             {holdingsOpen && (
@@ -484,6 +488,7 @@ function AccountCard({
                         key={h.id}
                         holding={h}
                         livePrice={livePrices?.[h.id]}
+                        privacy={privacy}
                         onUpdate={onUpdateHolding}
                         onDelete={onDeleteHolding}
                       />
@@ -587,6 +592,18 @@ export default function InvestmentsPage() {
   const [live, setLive] = useState<LivePriceState | null>(null);
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState<string | null>(null);
+  const [privacy, setPrivacy] = useState(false);
+
+  useEffect(() => {
+    setPrivacy(localStorage.getItem("investments-privacy") === "1");
+  }, []);
+
+  function togglePrivacy() {
+    const next = !privacy;
+    setPrivacy(next);
+    localStorage.setItem("investments-privacy", next ? "1" : "0");
+  }
+
   useEffect(() => {
     fetch("/api/investments")
       .then((r) => r.json())
@@ -689,6 +706,13 @@ export default function InvestmentsPage() {
         crumb={liveStatusCrumb}
         actions={
           <div className="flex items-center gap-2">
+            <button
+              onClick={togglePrivacy}
+              className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-accent"
+              aria-label={privacy ? "Show values" : "Hide values"}
+            >
+              {privacy ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            </button>
             <AtlasBtn variant="default" onClick={fetchLivePrices} disabled={liveLoading}>
               <RefreshCw className={cn("h-[13px] w-[13px]", liveLoading && "animate-spin")} />
               {liveLoading ? "Fetching…" : "Refresh"}
@@ -719,24 +743,24 @@ export default function InvestmentsPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-4 lg:mb-6">
           <StatTile
             label="Total portfolio"
-            num={`£${fmt(totalPortfolio)}`}
+            num={privacy ? "•••••" : `£${fmt(totalPortfolio)}`}
             sub={<span>{accounts.length} accounts</span>}
           />
           <StatTile
             label="Holdings P&L"
-            num={`${totalPl >= 0 ? "+" : ""}£${fmt(totalPl)}`}
+            num={privacy ? "•••••" : `${totalPl >= 0 ? "+" : ""}£${fmt(totalPl)}`}
             sub={<span className={plColor(totalPct)}>{totalPct >= 0 ? "+" : ""}{totalPct.toFixed(2)}%</span>}
             delta={totalPl >= 0 ? `+${totalPct.toFixed(1)}%` : `${totalPct.toFixed(1)}%`}
             deltaDir={totalPl >= 0 ? "up" : "down"}
           />
           <StatTile
             label="Cash uninvested"
-            num={`£${fmt(totalCash)}`}
-            sub={annualInterestTotal > 0 ? <span>~£{fmt(annualInterestTotal)} p.a.</span> : <span>no interest</span>}
+            num={privacy ? "•••••" : `£${fmt(totalCash)}`}
+            sub={annualInterestTotal > 0 ? <span>{privacy ? "•••••" : `~£${fmt(annualInterestTotal)} p.a.`}</span> : <span>no interest</span>}
           />
           <StatTile
             label="Cost basis"
-            num={`£${fmt(totalCost)}`}
+            num={privacy ? "•••••" : `£${fmt(totalCost)}`}
             sub={<span>holdings only</span>}
           />
         </div>
@@ -766,6 +790,7 @@ export default function InvestmentsPage() {
                 key={acc.id}
                 account={acc}
                 livePrices={live?.prices}
+                privacy={privacy}
                 onUpdateAccount={handleUpdateAccount}
                 onUpdateHolding={handleUpdateHolding}
                 onDeleteHolding={handleDeleteHolding}

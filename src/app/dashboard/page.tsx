@@ -15,7 +15,7 @@ import { listEvents, type GCalEvent } from "@/lib/google-calendar";
 import { getPortfolioHistory } from "@/lib/investments-history";
 import { computeHealthScore } from "@/lib/health-score";
 import Link from "next/link";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -148,14 +148,7 @@ export default async function DashboardPage() {
       <Topbar
         title={`Good ${now.getHours() < 12 ? "morning" : now.getHours() < 18 ? "afternoon" : "evening"}`}
         crumb={`${dayName} · ${dateStr}`}
-        actions={
-          <Link href="/diet">
-            <button className="inline-flex items-center gap-1.5 h-[30px] px-3 text-[12px] font-medium rounded-[4px] bg-primary text-primary-foreground hover:opacity-90 transition-opacity">
-              <Plus className="h-[13px] w-[13px]" />
-              Log
-            </button>
-          </Link>
-        }
+        className="pt-4"
       />
 
       <div

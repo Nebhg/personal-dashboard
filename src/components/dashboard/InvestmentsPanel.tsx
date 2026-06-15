@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Eye, EyeOff } from "lucide-react";
 import { Panel, PanelHead, PanelTitle } from "@/components/ui/panel";
 import { LineChart, type LinePoint } from "@/components/ui/line-chart";
 
@@ -36,6 +36,17 @@ export function InvestmentsPanel({ initialSeries }: { initialSeries: LinePoint[]
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [prices, setPrices] = useState<Record<string, PriceInfo> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [privacy, setPrivacy] = useState(false);
+
+  useEffect(() => {
+    setPrivacy(localStorage.getItem("investments-privacy") === "1");
+  }, []);
+
+  function togglePrivacy() {
+    const next = !privacy;
+    setPrivacy(next);
+    localStorage.setItem("investments-privacy", next ? "1" : "0");
+  }
 
   useEffect(() => {
     let active = true;
@@ -95,30 +106,40 @@ export function InvestmentsPanel({ initialSeries }: { initialSeries: LinePoint[]
   const dayPnlPct = totalValue - dayPnl !== 0 ? (dayPnl / (totalValue - dayPnl)) * 100 : 0;
   const pnlColor = dayPnl >= 0 ? POS : NEG;
   const sign = dayPnl >= 0 ? "+" : "−";
+  const MASK = "•••••";
 
   return (
     <Panel className="flex-1 flex flex-col">
       <PanelHead>
         <PanelTitle>Investments</PanelTitle>
-        <Link
-          href="/investments"
-          className="inline-flex items-center gap-1 text-[12px] text-[var(--fg-2)] hover:text-foreground transition-colors"
-        >
-          Open <ChevronRight className="h-3 w-3" />
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={togglePrivacy}
+            className="text-[var(--fg-2)] hover:text-foreground transition-colors"
+            aria-label={privacy ? "Show values" : "Hide values"}
+          >
+            {privacy ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+          </button>
+          <Link
+            href="/investments"
+            className="inline-flex items-center gap-1 text-[12px] text-[var(--fg-2)] hover:text-foreground transition-colors"
+          >
+            Open <ChevronRight className="h-3 w-3" />
+          </Link>
+        </div>
       </PanelHead>
 
       {/* Headline value + today's P&L */}
       <div className="px-4 pt-3 pb-2 flex items-center justify-between">
         <div className="leading-none">
           <span className="mono text-[22px] sm:text-[26px] font-[500] tracking-[-0.02em] tabular-nums">
-            {loading && !accounts ? "—" : gbp(totalValue)}
+            {loading && !accounts ? "—" : privacy ? MASK : gbp(totalValue)}
           </span>
           <span className="label ml-2">Portfolio value</span>
         </div>
         <div className="text-right leading-none">
           <span className="mono text-[14px] font-[500] tabular-nums" style={{ color: pnlColor }}>
-            {sign}{gbp(Math.abs(dayPnl))}
+            {privacy ? MASK : `${sign}${gbp(Math.abs(dayPnl))}`}
           </span>
           <span className="label ml-1.5" style={{ color: pnlColor }}>
             {sign}{Math.abs(dayPnlPct).toFixed(2)}% today
@@ -154,7 +175,7 @@ export function InvestmentsPanel({ initialSeries }: { initialSeries: LinePoint[]
                   </div>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
-                  <span className="mono text-[12px] tabular-nums">{gbp(r.value)}</span>
+                  <span className="mono text-[12px] tabular-nums">{privacy ? MASK : gbp(r.value)}</span>
                   {r.changePct != null && (
                     <span
                       className="mono text-[10px] px-1 py-px rounded-[2px] tabular-nums"
