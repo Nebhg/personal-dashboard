@@ -107,17 +107,17 @@ export default function DietPage() {
 
   const loadMeals = useCallback(async () => {
     const res = await fetch("/api/diet");
-    setMeals(await res.json());
+    if (res.ok) setMeals(await res.json());
   }, []);
 
   const loadRecipes = useCallback(async () => {
     const res = await fetch("/api/diet/recipes");
-    setRecipes(await res.json());
+    if (res.ok) setRecipes(await res.json());
   }, []);
 
   const loadMealPlan = useCallback(async () => {
     const res = await fetch("/api/diet/meal-plan");
-    setMealPlanEntries(await res.json());
+    if (res.ok) setMealPlanEntries(await res.json());
   }, []);
 
   const refresh = useCallback(() => {
